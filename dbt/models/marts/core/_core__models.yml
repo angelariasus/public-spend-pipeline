@@ -1,0 +1,127 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: Calendar from 2000 to 2030, one row per day.
+    columns:
+      - name: date_day
+        data_tests: [unique, not_null]
+
+  - name: dim_entity
+    description: Public entities that buy through SEACE, with their latest name and address.
+    columns:
+      - name: entity_id
+        description: OECE entity code (PE-CONSUCODE-...), the buyer of a process.
+        data_tests: [unique, not_null]
+      - name: entity_name
+        data_tests: [not_null]
+      - name: process_count
+        description: Contracting processes published in the loaded periods.
+
+  - name: dim_supplier
+    description: Suppliers that won at least one award.
+    columns:
+      - name: supplier_id
+        description: OCDS supplier ID (PE-RUC-...).
+        data_tests: [unique, not_null]
+      - name: supplier_type
+        description: company, individual, consortium, foreign or other, derived from the ID.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [company, individual, consortium, foreign, other]
+
+  - name: dim_investment_project
+    description: >
+      Public investment projects from MEF, active and closed. Amounts in soles.
+      physical_progress_pct is only reported for active projects.
+    columns:
+      - name: project_code
+        description: MEF CODIGO_UNICO.
+        data_tests: [unique, not_null]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [ACTIVO, CERRADO]
+
+  - name: dim_procurement_process
+    description: One row per contracting process.
+    columns:
+      - name: ocid
+        data_tests: [unique, not_null]
+      - name: entity_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_entity')
+                field: entity_id
+      - name: project_count
+        description: Investment projects funded by the process (0 when none).
+
+  - name: fct_award
+    description: One row per award, with its amount in soles.
+    columns:
+      - name: award_key
+        description: Surrogate key of (ocid, award_id).
+        data_tests: [unique, not_null]
+      - name: ocid
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_procurement_process')
+                field: ocid
+      - name: entity_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_entity')
+                field: entity_id
+      - name: supplier_id
+        description: NULL for ~3k awards published without a supplier.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_supplier')
+                field: supplier_id
+      - name: awarded_on
+        description: Award date in Lima time.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: award_amount_pen
+        data_tests: [not_null]
+
+  - name: fct_contract
+    description: One row per signed contract, with its amounts in soles.
+    columns:
+      - name: contract_key
+        description: Surrogate key of (ocid, contract_id).
+        data_tests: [unique, not_null]
+      - name: award_key
+        description: NULL when the contract's award is missing from the source.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('fct_award')
+                field: award_key
+      - name: entity_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_entity')
+                field: entity_id
+      - name: signed_on
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: contract_amount_pen
+        data_tests: [not_null]
