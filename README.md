@@ -15,7 +15,6 @@ procurement contracts with the execution of public investment projects.**
 [![dbt](https://img.shields.io/badge/dbt--core-1.12-FF694B)](https://www.getdbt.com/)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Metabase](https://img.shields.io/badge/Metabase-0.64-509EE3?logo=metabase&logoColor=white)](https://www.metabase.com/)
-[![Power BI](https://img.shields.io/badge/Power%20BI-planned-F2C811)](#roadmap)
 
 [![uv](https://img.shields.io/badge/uv-DE5FE9?logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
 [![Ruff](https://img.shields.io/badge/Ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
@@ -44,7 +43,6 @@ procurement contracts with the execution of public investment projects.**
 - [Development](#development)
 - [Project structure](#project-structure)
 - [Documentation](#documentation)
-- [Roadmap](#roadmap)
 - [License and data attribution](#license-and-data-attribution)
 
 ## Overview
@@ -92,7 +90,6 @@ flowchart LR
     raw --> dbt["Airflow<br/>dbt_build"]
     dbt --> staging[("staging<br/>typed, tested")] --> intermediate[("intermediate<br/>soles, bridges")] --> marts[("marts<br/>star schema")]
     marts --> metabase["Metabase"]
-    marts -.-> powerbi["Power BI<br/>planned"]
 ```
 
 Three Airflow DAGs run the pipeline. `oece_ingest` (09:30 Lima time) and
@@ -375,16 +372,6 @@ public-spend-pipeline/
 | [Data dictionary](docs/data-dictionary.md) | Every column of the marts, generated from dbt |
 | [Design decisions](docs/design-decisions.md) | Why the pipeline is built this way, and its known limitations |
 | [Findings](docs/findings.md) | What the data shows for 2024–2026 |
-
-## Roadmap
-
-- [x] OECE and MEF ingestion with idempotent, atomic loads
-- [x] dbt staging, intermediate and marts with data tests
-- [x] Orchestration with asset-aware scheduling
-- [x] Metabase dashboards as code
-- [x] Documentation and data dictionary
-- [ ] Power BI report on the same marts, through the read-only role
-- [ ] Map of projects by district (MEF publishes coordinates and ubigeo codes)
 
 ## License and data attribution
 
