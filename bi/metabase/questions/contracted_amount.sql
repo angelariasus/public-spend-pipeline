@@ -1,0 +1,2 @@
+select sum(contracted_amount_pen) as contracted_amount_pen
+from marts.mart_investment_vs_procurement
