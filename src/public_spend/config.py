@@ -10,8 +10,9 @@ from datetime import date
 
 _PERIOD_RE = re.compile(r"^(\d{4})-(\d{2})$")
 
-# OCDS tables loaded by default. The monthly bundle ships 21 CSVs; documents,
-# exchange rates and the full release history are not needed downstream.
+# OCDS tables loaded by default. The monthly bundle ships 21 CSVs; documents
+# and the full release history are not needed downstream. Exchange rates are:
+# about 2% of awards and contracts are not in soles.
 DEFAULT_OECE_TABLES: tuple[str, ...] = (
     "records",
     "com_parties",
@@ -20,7 +21,9 @@ DEFAULT_OECE_TABLES: tuple[str, ...] = (
     "com_ten_tenderers",
     "com_awards",
     "com_awa_suppliers",
+    "com_awa_val_exchangerates",
     "com_contracts",
+    "com_con_val_exchangerates",
 )
 
 DEFAULT_USER_AGENT = (
