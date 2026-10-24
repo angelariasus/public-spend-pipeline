@@ -1,0 +1,77 @@
+version: 2
+
+models:
+  - name: int_oece__exchange_rates_monthly
+    description: Average rate to soles per currency and month, from awards and contracts.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [currency, rate_month]
+    columns:
+      - name: exchange_rate
+        description: Soles per unit of the currency.
+        data_tests: [not_null]
+      - name: currency_average_rate
+        description: Observation-weighted average over all months, used as a last resort.
+
+  - name: int_oece__awards_pen
+    description: Awards with their amount converted to soles.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, award_id]
+    columns:
+      - name: exchange_rate_source
+        description: native (already PEN), reported, monthly_average or currency_average.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [native, reported, monthly_average, currency_average]
+      - name: award_amount_pen
+        data_tests: [not_null]
+
+  - name: int_oece__contracts_pen
+    description: Contracts with their amounts converted to soles.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, contract_id]
+    columns:
+      - name: exchange_rate_source
+        description: >
+          native, reported, award (rate reported by the contract's award),
+          monthly_average or currency_average.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [native, reported, award, monthly_average, currency_average]
+      - name: contract_amount_pen
+        data_tests: [not_null]
+
+  - name: int_oece__process_projects
+    description: >
+      Bridge between contracting processes and the investment projects
+      (MEF CODIGO_UNICO) listed in their budget.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, project_code]
+    columns:
+      - name: project_code
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "~ '^[0-9]+$'"
+      - name: allocation_weight
+        description: Share of the process amount attributed to the project (1 / project_count).
+
+  - name: int_mef__investments_unioned
+    description: Active and closed MEF investments with their shared columns.
+    columns:
+      - name: project_code
+        data_tests: [unique, not_null]
+      - name: accrued_total
+        description: Accrued spend to date, in soles.

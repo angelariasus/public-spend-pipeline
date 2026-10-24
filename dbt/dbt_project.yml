@@ -15,3 +15,10 @@ models:
       # Staging extracts fields from multi-million-row JSONB tables; views would
       # repeat that work on every downstream query.
       +materialized: table
+    intermediate:
+      +schema: intermediate
+      # Light joins over indexed staging tables; only marts are queried by BI.
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
