@@ -5,8 +5,8 @@ An end-to-end ELT pipeline that links Peru's public procurement contracts
 investment execution data from the Ministry of Economy and Finance (MEF), to
 measure how much is contracted versus how much is actually delivered.
 
-> Status: work in progress. Ingestion and dbt staging models are done; marts
-> and dashboards are next.
+> Status: work in progress. Ingestion, dbt models (staging, intermediate,
+> marts) and their orchestration are done; dashboards are next.
 
 ## Questions this project answers
 
@@ -20,10 +20,14 @@ measure how much is contracted versus how much is actually delivered.
 ## Architecture
 
 ```
-OECE OCDS API ──┐                                                     ┌─> Metabase (planned)
-                ├─> Airflow ─> Postgres `raw` ─> dbt `staging` ─> marts ┤
-MEF CSVs ───────┘   (Python)   (as landed)       (typed, tested)  (planned) └─> Power BI (later)
+OECE OCDS API ──┐                                                                       ┌─> Metabase (planned)
+                ├─> Airflow ─> Postgres `raw` ─> dbt `staging` ─> `intermediate` ─> `marts` ┤
+MEF CSVs ───────┘   (Python)   (as landed)       (typed, tested)  (PEN, bridges)   (star)   └─> Power BI (later)
 ```
+
+Three DAGs run the pipeline: `oece_ingest` and `mef_ingest` load `raw` every
+morning, and `dbt_build` starts once both have finished (asset-aware
+scheduling).
 
 | Layer          | Tool                                         |
 |----------------|----------------------------------------------|
@@ -46,7 +50,7 @@ The sources join on the investment project code: OCDS
 `planning/budget/projectID` (sometimes a comma-separated list) equals MEF
 `CODIGO_UNICO`. The active-projects file alone matches only 77% of the 2024
 project codes, because finished projects move to the closed-investments file;
-with both files, 96% of the 2024–2026 codes match.
+with both files, 95% of the 2024–2026 codes match.
 
 ## OECE ingestion
 
@@ -108,8 +112,8 @@ Design decisions:
 
 ## dbt models
 
-The dbt project lives in `dbt/` and builds into its own schemas
-(`staging`, later `intermediate` and `marts`).
+The dbt project lives in `dbt/` and builds into three schemas: `staging`,
+`intermediate` and `marts`.
 
 **Staging** has one model per source table. Models rename fields to English
 snake_case, cast text to numbers, dates and booleans, and are materialized as
@@ -145,6 +149,46 @@ Source quirks handled in staging:
   tests that only fail above a threshold.
 - ~200 active investments report physical progress above 100% (warning).
 
+**Intermediate** models (views) do the cross-table work:
+
+| Model | Purpose |
+|-------|---------|
+| `int_oece__exchange_rates_monthly` | Average rate to soles per currency and month, from every award and contract that reports one |
+| `int_oece__awards_pen` / `int_oece__contracts_pen` | Amounts in soles. Rate chain: reported by the record → reported by the contract's award → month average → currency average; `exchange_rate_source` says which one was used |
+| `int_oece__process_projects` | Bridge process × investment project, exploding comma-separated budget codes; amounts are split equally among a process's projects (99% fund one) |
+| `int_mef__investments_unioned` | Active and closed MEF investments with their shared columns |
+
+**Marts** (tables) form a star schema plus two analytical marts:
+
+| Model | Grain |
+|-------|-------|
+| `dim_date` | day (2000–2030) |
+| `dim_entity` | buying entity (latest name and address) |
+| `dim_supplier` | supplier, typed as company, individual, consortium or foreign from its ID |
+| `dim_investment_project` | MEF investment project, active or closed |
+| `dim_procurement_process` | contracting process |
+| `fct_award` | award, in original currency and soles |
+| `fct_contract` | contract, in original currency and soles |
+| `mart_investment_vs_procurement` | investment project: tendered, awarded and contracted amounts next to MEF cost, accrued spend and physical progress, with `is_lagging` and `is_contracted_above_cost` flags |
+| `mart_supplier_concentration` | entity × year: supplier count, top-supplier and top-5 shares, Herfindahl-Hirschman Index |
+
+Facts carry single-column surrogate keys (`award_key`, `contract_key`) so BI
+tools such as Power BI can relate them without composite keys. A singular test
+checks that splitting multi-project processes neither loses nor duplicates
+money.
+
+What the marts show with the 2024-01 to 2026-10 data:
+
+- S/ 222 billion awarded; 2% of awards and contracts are in foreign currency
+  (S/ 7.9 billion after conversion).
+- 33.5k investment projects received contracts through SEACE; 95% of them are
+  found in the MEF files.
+- 459 active projects signed at least S/ 1 million in contracts over a year
+  ago and still report less than 25% physical progress (S/ 14 billion).
+- 354 projects have contracts above 150% of their cost. Many are tagging
+  errors: one entity charged S/ 1.6 billion of works to the code of a
+  S/ 0.8 million sports court.
+
 Run it against the local warehouse (dbt does not read `.env` itself):
 
 ```bash
@@ -152,9 +196,15 @@ cd dbt
 set -a && . ../.env && set +a
 export DBT_PROFILES_DIR=.
 uv run dbt deps
-uv run dbt build --select staging
+uv run dbt build
 uv run dbt source freshness
 ```
+
+In the stack, the `dbt_build` DAG runs the same commands. dbt is installed in
+its own virtualenv inside the Airflow image (its pins would conflict with
+Airflow's), and each run copies the read-only `dbt/` mount to a temporary
+directory so it never writes into the repository. The ingestion tasks emit the
+`raw_oece` and `raw_mef` assets; `dbt_build` emits `marts` for the BI layer.
 
 ## Getting started
 
@@ -169,8 +219,8 @@ docker compose up -d --build
 - Airflow UI: <http://localhost:8080> (user and password from `.env`)
 - Warehouse: `postgresql://<WAREHOUSE_USER>:<WAREHOUSE_PASSWORD>@localhost:5433/warehouse`
 
-Enable the `oece_ingest` and `mef_ingest` DAGs in the UI, or run the loads from
-the command line:
+Enable the `oece_ingest`, `mef_ingest` and `dbt_build` DAGs in the UI, or run
+the loads from the command line:
 
 ```bash
 docker compose exec airflow-scheduler python -m public_spend.oece.pipeline --period 2024-01
@@ -201,7 +251,7 @@ enforced by a `commit-msg` hook.
 
 ```
 ├── airflow/dags/          # Airflow DAGs (thin wrappers around src/)
-├── dbt/                   # dbt project: macros, staging models, tests
+├── dbt/                   # dbt project: macros, staging/intermediate/marts models, tests
 ├── docker/                # Airflow image and Postgres init script
 ├── src/public_spend/      # Ingestion package
 │   ├── oece/              # index client, bundle reader, raw loader, entry points
