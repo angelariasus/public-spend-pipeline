@@ -5,8 +5,10 @@ An end-to-end ELT pipeline that links Peru's public procurement contracts
 investment execution data from the Ministry of Economy and Finance (MEF), to
 measure how much is contracted versus how much is actually delivered.
 
-> Status: work in progress. Ingestion, dbt models (staging, intermediate,
-> marts) and their orchestration are done; dashboards are next.
+> Status: ingestion, dbt models, orchestration and Metabase dashboards are
+> done. A Power BI report on the same marts is planned.
+
+![Public procurement overview dashboard](docs/images/metabase-procurement-overview.png)
 
 ## Questions this project answers
 
@@ -20,7 +22,7 @@ measure how much is contracted versus how much is actually delivered.
 ## Architecture
 
 ```
-OECE OCDS API ──┐                                                                       ┌─> Metabase (planned)
+OECE OCDS API ──┐                                                                       ┌─> Metabase
                 ├─> Airflow ─> Postgres `raw` ─> dbt `staging` ─> `intermediate` ─> `marts` ┤
 MEF CSVs ───────┘   (Python)   (as landed)       (typed, tested)  (PEN, bridges)   (star)   └─> Power BI (later)
 ```
@@ -35,7 +37,7 @@ scheduling).
 | Ingestion      | Python (`requests`, `psycopg`)               |
 | Warehouse      | PostgreSQL 16                                |
 | Transformation | dbt-core 1.12 + dbt_utils                    |
-| BI             | Metabase (planned), Power BI (later)         |
+| BI             | Metabase 0.64 (dashboards as code), Power BI (later) |
 | Tooling        | uv, ruff, sqlfluff, pytest, pre-commit, GitHub Actions |
 
 ## Data sources
@@ -206,6 +208,28 @@ Airflow's), and each run copies the read-only `dbt/` mount to a temporary
 directory so it never writes into the repository. The ingestion tasks emit the
 `raw_oece` and `raw_mef` assets; `dbt_build` emits `marts` for the BI layer.
 
+## Dashboards
+
+Metabase reads only the `marts` schema, through a read-only role
+(`BI_READER_USER`). dbt grants that role `SELECT` on every mart it builds and
+`USAGE` on the schema in an `on-run-end` hook, so access survives each rebuild.
+Power BI will connect with the same role.
+
+The dashboards are code. Each question is a SQL file in
+`bi/metabase/questions/`, and `src/public_spend/metabase/content.py` declares
+the chart type, formatting and position of every tile. The
+`metabase-provision` service applies them through the Metabase API: it
+completes the first-run setup, connects the warehouse, and creates or updates
+the questions and dashboards by name, archiving questions that were removed.
+Re-running it after editing a file updates Metabase in place.
+
+| Dashboard | Answers |
+|-----------|---------|
+| Public procurement overview | Awarded amount by month, category, entity and department; supplier types; supplier concentration (HHI) per entity and year |
+| Investment projects: contracted vs delivered | Contracted vs accrued spend by level of government; physical progress of projects with contracts; lagging projects; contracts above the project cost |
+
+![Investment projects dashboard](docs/images/metabase-investment-vs-procurement.png)
+
 ## Getting started
 
 Requirements: Docker with ~6 GB of memory, and [uv](https://docs.astral.sh/uv/)
@@ -217,7 +241,20 @@ docker compose up -d --build
 ```
 
 - Airflow UI: <http://localhost:8080> (user and password from `.env`)
+- Metabase: <http://localhost:3000> (`METABASE_ADMIN_EMAIL` and
+  `METABASE_ADMIN_PASSWORD` from `.env`)
 - Warehouse: `postgresql://<WAREHOUSE_USER>:<WAREHOUSE_PASSWORD>@localhost:5433/warehouse`
+
+The dashboards are empty until the first `dbt_build` run creates the marts.
+To re-apply them after editing a question or the layout:
+
+```bash
+docker compose up metabase-provision
+```
+
+The Postgres init scripts only run on an empty data volume. On a volume
+created before the BI roles existed, create them once with
+`docker compose exec postgres bash /docker-entrypoint-initdb.d/02-create-bi-roles.sh`.
 
 Enable the `oece_ingest`, `mef_ingest` and `dbt_build` DAGs in the UI, or run
 the loads from the command line:
@@ -233,7 +270,7 @@ docker compose exec airflow-scheduler python -m public_spend.mef.pipeline  # --d
 uv sync
 uv run pre-commit install
 uv run ruff check . && uv run ruff format --check .
-uv run sqlfluff lint dbt/models dbt/tests
+uv run sqlfluff lint dbt/models dbt/tests bi/metabase/questions
 uv run pytest                 # integration tests are skipped without a database
 ```
 
@@ -251,11 +288,14 @@ enforced by a `commit-msg` hook.
 
 ```
 ├── airflow/dags/          # Airflow DAGs (thin wrappers around src/)
+├── bi/metabase/questions/ # SQL behind every Metabase question
 ├── dbt/                   # dbt project: macros, staging/intermediate/marts models, tests
-├── docker/                # Airflow image and Postgres init script
-├── src/public_spend/      # Ingestion package
+├── docker/                # Airflow image and Postgres init scripts
+├── docs/images/           # dashboard screenshots
+├── src/public_spend/      # Python package: ingestion and Metabase provisioning
 │   ├── oece/              # index client, bundle reader, raw loader, entry points
-│   └── mef/               # conditional download, snapshot loader, entry point
+│   ├── mef/               # conditional download, snapshot loader, entry point
+│   └── metabase/          # API client, dashboard definitions, provisioning
 ├── tests/                 # unit and integration tests
 └── docker-compose.yml
 ```
