@@ -1,0 +1,17 @@
+name: public_spend
+version: "0.1.0"
+config-version: 2
+profile: public_spend
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  public_spend:
+    staging:
+      +schema: staging
+      # Staging extracts fields from multi-million-row JSONB tables; views would
+      # repeat that work on every downstream query.
+      +materialized: table
