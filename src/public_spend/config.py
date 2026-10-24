@@ -63,6 +63,12 @@ class Settings:
     oece_base_url: str = "https://contratacionesabiertas.oece.gob.pe/api/v1"
     oece_source: str = "seace_v3"
     oece_tables: tuple[str, ...] = DEFAULT_OECE_TABLES
+    mef_investments_url: str = (
+        "https://fs.datosabiertos.mef.gob.pe/datastorefiles/DETALLE_INVERSIONES.csv"
+    )
+    mef_closed_investments_url: str = (
+        "https://fs.datosabiertos.mef.gob.pe/datastorefiles/CIERRE_INVERSIONES.csv"
+    )
     raw_schema: str = "raw"
     user_agent: str = DEFAULT_USER_AGENT
     http_timeout_seconds: int = 120
@@ -88,6 +94,10 @@ class Settings:
                 tuple(t.strip().lower() for t in tables.split(",") if t.strip())
                 if tables
                 else DEFAULT_OECE_TABLES
+            ),
+            mef_investments_url=env.get("MEF_INVESTMENTS_URL", cls.mef_investments_url),
+            mef_closed_investments_url=env.get(
+                "MEF_CLOSED_INVESTMENTS_URL", cls.mef_closed_investments_url
             ),
             raw_schema=env.get("RAW_SCHEMA", cls.raw_schema),
             user_agent=env.get("HTTP_USER_AGENT", cls.user_agent),
