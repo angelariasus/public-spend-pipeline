@@ -26,6 +26,7 @@ x-airflow-common: &airflow-common
     WAREHOUSE_USER: ${WAREHOUSE_USER}
     WAREHOUSE_PASSWORD: ${WAREHOUSE_PASSWORD}
     WAREHOUSE_DB: ${WAREHOUSE_DB}
+    BI_READER_USER: ${BI_READER_USER}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./src:/opt/airflow/src:ro
@@ -46,6 +47,11 @@ services:
       WAREHOUSE_DB: ${WAREHOUSE_DB:?set WAREHOUSE_DB in .env}
       WAREHOUSE_USER: ${WAREHOUSE_USER:?set WAREHOUSE_USER in .env}
       WAREHOUSE_PASSWORD: ${WAREHOUSE_PASSWORD:?set WAREHOUSE_PASSWORD in .env}
+      BI_READER_USER: ${BI_READER_USER:?set BI_READER_USER in .env}
+      BI_READER_PASSWORD: ${BI_READER_PASSWORD:?set BI_READER_PASSWORD in .env}
+      METABASE_DB: ${METABASE_DB:?set METABASE_DB in .env}
+      METABASE_DB_USER: ${METABASE_DB_USER:?set METABASE_DB_USER in .env}
+      METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD:?set METABASE_DB_PASSWORD in .env}
     ports:
       - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
@@ -116,6 +122,59 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
+
+  metabase:
+    image: metabase/metabase:v0.64.3.4
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: postgres
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: ${METABASE_DB}
+      MB_DB_USER: ${METABASE_DB_USER}
+      MB_DB_PASS: ${METABASE_DB_PASSWORD}
+      MB_ENCRYPTION_SECRET_KEY: ${METABASE_ENCRYPTION_KEY:?set METABASE_ENCRYPTION_KEY in .env}
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      # No sample database or example dashboards.
+      MB_LOAD_SAMPLE_CONTENT: "false"
+      JAVA_TIMEZONE: America/Lima
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Creates the admin user, the warehouse connection and the dashboards
+  # (src/public_spend/metabase + bi/metabase/questions), then exits. Safe to
+  # re-run: it updates what exists.
+  metabase-provision:
+    build:
+      context: docker/airflow
+    image: public-spend-airflow:3.3.2
+    entrypoint: ["python", "-m", "public_spend.metabase.provision"]
+    environment:
+      PYTHONPATH: /opt/airflow/src
+      METABASE_URL: http://metabase:3000
+      METABASE_QUESTIONS_DIR: /opt/bi/metabase/questions
+      METABASE_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL:?set METABASE_ADMIN_EMAIL in .env}
+      METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:?set METABASE_ADMIN_PASSWORD in .env}
+      WAREHOUSE_DB: ${WAREHOUSE_DB}
+      BI_READER_USER: ${BI_READER_USER}
+      BI_READER_PASSWORD: ${BI_READER_PASSWORD}
+    volumes:
+      - ./src:/opt/airflow/src:ro
+      - ./bi:/opt/bi:ro
+    restart: "no"
+    depends_on:
+      metabase:
+        condition: service_healthy
 
 volumes:
   postgres-data:
