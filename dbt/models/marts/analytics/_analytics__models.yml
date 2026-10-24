@@ -10,9 +10,56 @@ models:
       equally among them.
     columns:
       - name: project_code
+        description: MEF `CODIGO_UNICO`; the key.
         data_tests: [unique, not_null]
       - name: is_matched_in_mef
         description: False when the code is in neither MEF file (MEF columns are NULL).
+      - name: project_name
+        description: Project name from MEF.
+      - name: status
+        description: ACTIVO or CERRADO.
+      - name: is_closed
+        description: True for projects from the closed-investments file.
+      - name: government_level
+        description: GN (national), GR (regional) or GL (local government).
+      - name: sector
+        description: Government sector responsible for the project.
+      - name: entity_name
+        description: Entity that owns the project in MEF.
+      - name: budget_function
+        description: Budget function of the project.
+      - name: department
+        description: Department where the project is located.
+      - name: province
+        description: Province where the project is located.
+      - name: district
+        description: District where the project is located.
+      - name: process_count
+        description: Contracting processes that list the project in their budget.
+      - name: contracted_process_count
+        description: Those processes that have at least one signed contract.
+      - name: shared_process_count
+        description: Processes that fund this project together with others.
+      - name: award_count
+        description: Awards across the project's processes.
+      - name: contract_count
+        description: Contracts across the project's processes.
+      - name: tendered_amount_pen
+        description: Estimated tender value attributed to the project, in soles.
+      - name: awarded_amount_pen
+        description: Awarded amount attributed to the project, in soles.
+      - name: contracted_amount_pen
+        description: Contracted amount attributed to the project, in soles.
+      - name: viable_amount
+        description: MEF investment amount at viability, in soles.
+      - name: updated_cost
+        description: MEF current total cost, in soles.
+      - name: accrued_total
+        description: MEF spend accrued over the whole life of the project, in soles.
+      - name: accrued_to_cost_pct
+        description: Accrued spend as a percentage of the updated cost.
+      - name: physical_progress_pct
+        description: Physical progress reported to MEF, in percent. Active projects only.
       - name: contracted_to_cost_pct
         description: Contracted amount as a percentage of the project's updated cost.
       - name: accrued_to_contracted_pct
@@ -20,6 +67,14 @@ models:
           MEF accrued spend as a percentage of the contracted amount. Accrued
           spend covers the whole project life, including contracts signed
           before the loaded periods, so values above 100 are expected.
+      - name: first_tender_published_on
+        description: Earliest tender publication date among the project's processes.
+      - name: last_tender_published_on
+        description: Latest tender publication date among the project's processes.
+      - name: first_contract_signed_on
+        description: Earliest contract signature date among the project's processes.
+      - name: last_contract_signed_on
+        description: Latest contract signature date among the project's processes.
       - name: is_contracted_above_cost
         description: >
           Contracted amount above 150% of the updated cost. Usually a process
@@ -39,6 +94,28 @@ models:
           arguments:
             combination_of_columns: [entity_id, award_year]
     columns:
+      - name: entity_id
+        description: Buying entity; references `dim_entity`.
+      - name: entity_name
+        description: Name of the entity.
+      - name: department
+        description: Department of the entity's address.
+      - name: award_year
+        description: Calendar year of the award date, in Lima time.
+      - name: supplier_count
+        description: Distinct suppliers awarded by the entity in the year.
+      - name: award_count
+        description: Awards made by the entity in the year.
+      - name: awarded_amount_pen
+        description: Total awarded by the entity in the year, in soles.
+      - name: top_supplier_id
+        description: Supplier with the largest awarded amount; references `dim_supplier`.
+      - name: top_supplier_name
+        description: Name of the top supplier.
+      - name: top_supplier_share
+        description: Share of the awarded amount won by the largest supplier (0-1).
+      - name: top_5_supplier_share
+        description: Share of the awarded amount won by the five largest suppliers (0-1).
       - name: hhi
         description: >
           Herfindahl-Hirschman Index of supplier shares, from near 0 (many
@@ -49,8 +126,6 @@ models:
               arguments:
                 min_value: 0
                 max_value: 10000.0001
-      - name: top_supplier_share
-        description: Share of the awarded amount won by the largest supplier (0-1).
       - name: concentration_level
         description: low (HHI < 1,500), moderate (< 2,500) or high.
         data_tests:

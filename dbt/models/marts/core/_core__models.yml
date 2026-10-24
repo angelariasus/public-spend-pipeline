@@ -5,74 +5,220 @@ models:
     description: Calendar from 2000 to 2030, one row per day.
     columns:
       - name: date_day
+        description: Calendar date; the key.
         data_tests: [unique, not_null]
+      - name: calendar_year
+        description: Four-digit year.
+      - name: calendar_quarter
+        description: Quarter of the year, 1 to 4.
+      - name: calendar_month
+        description: Month of the year, 1 to 12.
+      - name: calendar_year_month
+        description: Year and month as `YYYY-MM`, for sorting and labels.
+      - name: month_start
+        description: First day of the month; the join key for monthly aggregates.
+      - name: month_name
+        description: English month name.
+      - name: iso_day_of_week
+        description: ISO weekday, 1 (Monday) to 7 (Sunday).
+      - name: is_weekend
+        description: True on Saturdays and Sundays.
 
   - name: dim_entity
-    description: Public entities that buy through SEACE, with their latest name and address.
+    description: >
+      Public entities that buy through SEACE, one row per entity. The name and
+      address come from the entity's most recently published process.
     columns:
       - name: entity_id
-        description: OECE entity code (PE-CONSUCODE-...), the buyer of a process.
+        description: OECE entity code (`PE-CONSUCODE-...`), the buyer of a process.
         data_tests: [unique, not_null]
       - name: entity_name
+        description: Legal name from the parties table, or the buyer name when missing.
         data_tests: [not_null]
+      - name: department
+        description: Department (region) of the entity's address.
+      - name: province
+        description: Province of the entity's address.
+      - name: district
+        description: District of the entity's address.
       - name: process_count
-        description: Contracting processes published in the loaded periods.
+        description: Contracting processes published by the entity in the loaded periods.
+      - name: first_tender_published_at
+        description: Publication timestamp of the entity's earliest loaded process.
+      - name: last_tender_published_at
+        description: Publication timestamp of the entity's latest loaded process.
 
   - name: dim_supplier
-    description: Suppliers that won at least one award.
+    description: Suppliers that won at least one award, one row per supplier ID.
     columns:
       - name: supplier_id
-        description: OCDS supplier ID (PE-RUC-...).
+        description: OCDS supplier ID (`PE-RUC-...`), as published by OECE.
         data_tests: [unique, not_null]
+      - name: tax_id
+        description: The ID without its `PE-RUC-` prefix; a RUC, a consortium code or a foreign ID.
+      - name: supplier_name
+        description: Legal name from the parties table, or the name on the latest award.
       - name: supplier_type
-        description: company, individual, consortium, foreign or other, derived from the ID.
+        description: >
+          Derived from the ID: company (RUC starting with 20), individual (RUC
+          starting with 10, 15, 16 or 17), consortium (6-7 digit SEACE code),
+          foreign (L prefix) or other.
         data_tests:
           - accepted_values:
               arguments:
                 values: [company, individual, consortium, foreign, other]
+      - name: department
+        description: Department of the supplier's address, when published.
+      - name: country
+        description: Country of the supplier's address, when published.
 
   - name: dim_investment_project
     description: >
-      Public investment projects from MEF, active and closed. Amounts in soles.
-      physical_progress_pct is only reported for active projects.
+      Public investment projects from the MEF Banco de Inversiones, active and
+      closed, one row per project. Amounts are in soles. Columns that only the
+      active file reports are NULL for closed projects.
     columns:
       - name: project_code
-        description: MEF CODIGO_UNICO.
+        description: MEF `CODIGO_UNICO`; the key, shared with OCDS budget project IDs.
         data_tests: [unique, not_null]
+      - name: snip_code
+        description: Legacy SNIP code, for projects registered before Invierte.pe.
+      - name: project_name
+        description: Project name as registered in MEF.
       - name: status
+        description: ACTIVO (active file) or CERRADO (closed file).
         data_tests:
           - accepted_values:
               arguments:
                 values: [ACTIVO, CERRADO]
+      - name: is_closed
+        description: True for projects from the closed-investments file.
+      - name: government_level
+        description: GN (national), GR (regional) or GL (local government).
+      - name: sector
+        description: Government sector responsible for the project.
+      - name: entity_name
+        description: Entity that owns the project in MEF.
+      - name: executing_unit_code
+        description: Budget code of the executing unit.
+      - name: executing_unit_name
+        description: Name of the executing unit.
+      - name: investment_type
+        description: MEF investment type (project, IOARR, program, ...).
+      - name: typology
+        description: MEF typology of the project.
+      - name: budget_function
+        description: Budget function (transport, education, health, ...).
+      - name: department
+        description: Department where the project is located.
+      - name: province
+        description: Province where the project is located.
+      - name: district
+        description: District where the project is located.
+      - name: ubigeo
+        description: INEI geographic code of the district.
+      - name: latitude
+        description: Latitude of the project, NULL when MEF reports 0.
+      - name: longitude
+        description: Longitude of the project, NULL when MEF reports 0.
+      - name: beneficiaries
+        description: Number of beneficiaries declared for the project.
+      - name: viable_amount
+        description: Investment amount when the project was declared viable, in soles.
+      - name: updated_cost
+        description: Current total cost of the project, in soles.
+      - name: accrued_total
+        description: Spend accrued over the whole life of the project, in soles.
+      - name: accrued_to_cost_pct
+        description: Accrued spend as a percentage of the updated cost.
+      - name: modified_budget_current_year
+        description: Modified budget (PIM) for the current year, in soles. Active projects only.
+      - name: accrued_current_year
+        description: Spend accrued in the current year, in soles. Active projects only.
+      - name: physical_progress_pct
+        description: Physical progress reported by the entity, in percent. Active projects only.
+      - name: registered_on
+        description: Date the project was registered in the Banco de Inversiones.
+      - name: viability_on
+        description: Date the project was declared viable or approved.
+      - name: physical_execution_start_on
+        description: Reported start of physical execution.
+      - name: physical_execution_end_on
+        description: Reported or planned end of physical execution.
+      - name: first_accrual_month
+        description: Month of the first accrued spend.
+      - name: last_accrual_month
+        description: Month of the latest accrued spend.
+      - name: closed_at
+        description: When the project was closed. Closed projects only.
 
   - name: dim_procurement_process
-    description: One row per contracting process.
+    description: >
+      One row per contracting process (tender) published by OECE in the loaded
+      periods, with its buying entity and the investment projects it funds.
     columns:
       - name: ocid
+        description: Open Contracting ID of the process; the key.
         data_tests: [unique, not_null]
+      - name: tender_id
+        description: SEACE process nomenclature, e.g. `LP-SM-9-2024-INVERMET-1`.
       - name: entity_id
+        description: Buying entity; references `dim_entity`.
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_entity')
                 field: entity_id
+      - name: source_period
+        description: Month of the OECE bulk file the process was loaded from.
+      - name: tender_title
+        description: Title of the tender.
+      - name: main_procurement_category
+        description: OCDS category - goods, services or works.
+      - name: procurement_method
+        description: OCDS method - open, selective, limited or direct. NULL for a third of processes.
+      - name: procurement_method_details
+        description: SEACE procedure type (licitación pública, adjudicación simplificada, ...).
+      - name: tender_published_at
+        description: Publication timestamp of the tender.
+      - name: tender_published_on
+        description: Publication date in Lima time; references `dim_date`.
+      - name: number_of_tenderers
+        description: Bidders that took part in the tender.
+      - name: tender_currency
+        description: Currency of the estimated tender value.
+      - name: tender_amount
+        description: Estimated tender value in its original currency.
+      - name: tender_amount_pen
+        description: Estimated tender value in soles, as reported by OECE.
+      - name: budget_project_ids
+        description: Raw list of MEF project codes funded by the process, comma-separated.
       - name: project_count
         description: Investment projects funded by the process (0 when none).
+      - name: is_investment_linked
+        description: True when the process funds at least one investment project.
 
   - name: fct_award
-    description: One row per award, with its amount in soles.
+    description: >
+      One row per award, with its amount in the original currency and in soles.
+      Awards in this source have a single supplier; consortia are registered as
+      one supplier.
     columns:
       - name: award_key
-        description: Surrogate key of (ocid, award_id).
+        description: Surrogate key of (`ocid`, `award_id`), for single-column joins in BI tools.
         data_tests: [unique, not_null]
       - name: ocid
+        description: Process the award belongs to; references `dim_procurement_process`.
         data_tests:
           - relationships:
               arguments:
                 to: ref('dim_procurement_process')
                 field: ocid
+      - name: award_id
+        description: Award ID as published; only unique within a process.
       - name: entity_id
+        description: Buying entity; references `dim_entity`.
         data_tests:
           - not_null
           - relationships:
@@ -80,48 +226,101 @@ models:
                 to: ref('dim_entity')
                 field: entity_id
       - name: supplier_id
-        description: NULL for ~3k awards published without a supplier.
+        description: Winning supplier; references `dim_supplier`. NULL for ~3k awards published without one.
         data_tests:
           - relationships:
               arguments:
                 to: ref('dim_supplier')
                 field: supplier_id
       - name: awarded_on
-        description: Award date in Lima time.
+        description: Award date in Lima time; references `dim_date`.
         data_tests:
           - relationships:
               arguments:
                 to: ref('dim_date')
                 field: date_day
+      - name: source_period
+        description: Month of the OECE bulk file the award was loaded from.
+      - name: main_procurement_category
+        description: Category of the process - goods, services or works.
+      - name: award_currency
+        description: ISO code of the award currency.
+      - name: award_amount
+        description: Awarded amount in its original currency.
+      - name: exchange_rate_to_pen
+        description: Soles per unit of the award currency (1 for PEN).
+      - name: exchange_rate_source
+        description: >
+          Where the rate came from: native (PEN), reported (by the award),
+          monthly_average (of the currency in that month) or currency_average
+          (over all months).
       - name: award_amount_pen
+        description: Awarded amount in soles.
         data_tests: [not_null]
 
   - name: fct_contract
-    description: One row per signed contract, with its amounts in soles.
+    description: >
+      One row per signed contract, with its amounts in the original currency
+      and in soles. The supplier is taken from the contract's award.
     columns:
       - name: contract_key
-        description: Surrogate key of (ocid, contract_id).
+        description: Surrogate key of (`ocid`, `contract_id`).
         data_tests: [unique, not_null]
+      - name: ocid
+        description: Process the contract belongs to; references `dim_procurement_process`.
+      - name: contract_id
+        description: Contract ID as published; only unique within a process.
       - name: award_key
-        description: NULL when the contract's award is missing from the source.
+        description: Award the contract implements; references `fct_award`. NULL when the award is missing from the source.
         data_tests:
           - relationships:
               arguments:
                 to: ref('fct_award')
                 field: award_key
       - name: entity_id
+        description: Buying entity; references `dim_entity`.
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_entity')
                 field: entity_id
+      - name: supplier_id
+        description: Supplier of the award; references `dim_supplier`.
       - name: signed_on
+        description: Signature date in Lima time; references `dim_date`.
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_date')
                 field: date_day
+      - name: period_start_on
+        description: Start of the contract period.
+      - name: period_end_on
+        description: End of the contract period.
+      - name: duration_days
+        description: Contract duration in days, as published.
+      - name: source_period
+        description: Month of the OECE bulk file the contract was loaded from.
+      - name: main_procurement_category
+        description: Category of the process - goods, services or works.
+      - name: contract_title
+        description: Contract number or title, as published.
+      - name: contract_currency
+        description: ISO code of the contract currency.
+      - name: contract_amount
+        description: Contract amount in its original currency.
+      - name: final_amount
+        description: Final value after implementation, in the contract currency. Reported for ~10% of contracts.
+      - name: exchange_rate_to_pen
+        description: Soles per unit of the contract currency (1 for PEN).
+      - name: exchange_rate_source
+        description: >
+          Where the rate came from: native, reported (by the contract), award
+          (reported by its award), monthly_average or currency_average.
       - name: contract_amount_pen
+        description: Contract amount in soles.
         data_tests: [not_null]
+      - name: final_amount_pen
+        description: Final value in soles, when reported.
