@@ -17,6 +17,22 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run sqlfluff lint dbt/models dbt/tests
+
+  dbt:
+    runs-on: ubuntu-latest
+    env:
+      DBT_PROFILES_DIR: .
+    defaults:
+      run:
+        working-directory: dbt
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: uv sync --locked
+      # Parsing validates refs, sources, configs and test definitions without a database.
+      - run: uv run dbt deps
+      - run: uv run dbt parse
 
   test:
     runs-on: ubuntu-latest
