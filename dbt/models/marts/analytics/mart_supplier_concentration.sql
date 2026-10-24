@@ -44,7 +44,7 @@ concentration as (
         entity_id,
         award_year,
         count(*) as supplier_count,
-        sum(award_count) as award_count,
+        sum(award_count)::bigint as award_count,
         sum(awarded_amount_pen) as awarded_amount_pen,
         max(supplier_id) filter (where supplier_rank = 1) as top_supplier_id,
         max(supplier_share) as top_supplier_share,

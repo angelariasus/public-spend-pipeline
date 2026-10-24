@@ -42,8 +42,8 @@ by_project as (
         count(*) as process_count,
         count(contract_totals.ocid) as contracted_process_count,
         count(*) filter (where process_projects.project_count > 1) as shared_process_count,
-        coalesce(sum(award_totals.award_count), 0) as award_count,
-        coalesce(sum(contract_totals.contract_count), 0) as contract_count,
+        coalesce(sum(award_totals.award_count), 0)::bigint as award_count,
+        coalesce(sum(contract_totals.contract_count), 0)::bigint as contract_count,
         sum(processes.tender_amount_pen * process_projects.allocation_weight)
             as tendered_amount_pen,
         coalesce(sum(award_totals.awarded_amount_pen * process_projects.allocation_weight), 0)
