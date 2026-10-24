@@ -9,6 +9,8 @@ exclude_rules = structure.column_order
 [sqlfluff:templater:jinja]
 apply_dbt_builtins = True
 load_macros_from_path = dbt/macros
+# Python stand-ins for package macros (dbt_utils.*).
+library_path = dbt/sqlfluff_libs
 
 [sqlfluff:indentation]
 indented_joins = False
