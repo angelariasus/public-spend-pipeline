@@ -11,10 +11,13 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "dbt-core>=1.11",
+    "dbt-postgres>=1.11",
     "pre-commit>=4.0",
     "pytest>=9.0",
     "responses>=0.26",
     "ruff>=0.17",
+    "sqlfluff>=4.0",
 ]
 
 [build-system]
