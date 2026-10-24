@@ -5,8 +5,8 @@ An end-to-end ELT pipeline that links Peru's public procurement contracts
 investment execution data from the Ministry of Economy and Finance (MEF), to
 measure how much is contracted versus how much is actually delivered.
 
-> Status: work in progress. Ingestion of both sources is done; dbt models and
-> dashboards are next.
+> Status: work in progress. Ingestion and dbt staging models are done; marts
+> and dashboards are next.
 
 ## Questions this project answers
 
@@ -20,9 +20,9 @@ measure how much is contracted versus how much is actually delivered.
 ## Architecture
 
 ```
-OECE OCDS API ──┐                                        ┌─> Metabase (planned)
-                ├─> Airflow ─> Postgres `raw` ─> dbt ────┤
-MEF CSV ────────┘   (Python)   (as landed)    (planned)  └─> Power BI (later)
+OECE OCDS API ──┐                                                     ┌─> Metabase (planned)
+                ├─> Airflow ─> Postgres `raw` ─> dbt `staging` ─> marts ┤
+MEF CSVs ───────┘   (Python)   (as landed)       (typed, tested)  (planned) └─> Power BI (later)
 ```
 
 | Layer          | Tool                                         |
@@ -30,9 +30,9 @@ MEF CSV ────────┘   (Python)   (as landed)    (planned)  └�
 | Orchestration  | Apache Airflow 3.3 (LocalExecutor)           |
 | Ingestion      | Python (`requests`, `psycopg`)               |
 | Warehouse      | PostgreSQL 16                                |
-| Transformation | dbt-core (planned)                           |
+| Transformation | dbt-core 1.12 + dbt_utils                    |
 | BI             | Metabase (planned), Power BI (later)         |
-| Tooling        | uv, ruff, pytest, pre-commit, GitHub Actions |
+| Tooling        | uv, ruff, sqlfluff, pytest, pre-commit, GitHub Actions |
 
 ## Data sources
 
@@ -77,7 +77,10 @@ Design decisions:
 
 Tables loaded by default (configurable with `OECE_TABLES`): `records`,
 `com_parties`, `com_ten_items`, `com_ten_ite_additionalclassific`,
-`com_ten_tenderers`, `com_awards`, `com_awa_suppliers`, `com_contracts`.
+`com_ten_tenderers`, `com_awards`, `com_awa_suppliers`,
+`com_awa_val_exchangerates`, `com_contracts`, `com_con_val_exchangerates`.
+The exchange-rate tables matter: about 2% of awards and contracts are in USD,
+EUR or other currencies.
 
 ## MEF ingestion
 
@@ -102,6 +105,56 @@ Design decisions:
   row count and column list.
 - **DDL is serialized with a Postgres advisory lock**, because parallel tasks
   running `CREATE ... IF NOT EXISTS` on the same object can fail.
+
+## dbt models
+
+The dbt project lives in `dbt/` and builds into its own schemas
+(`staging`, later `intermediate` and `marts`).
+
+**Staging** has one model per source table. Models rename fields to English
+snake_case, cast text to numbers, dates and booleans, and are materialized as
+indexed tables because they extract from multi-million-row JSONB tables.
+
+| Model | Grain |
+|-------|-------|
+| `stg_oece__records` | contracting process (`ocid`) |
+| `stg_oece__parties` | organization × process |
+| `stg_oece__tenderers` | bidder × process |
+| `stg_oece__tender_items` / `stg_oece__tender_item_classifications` | tender item / item × UNSPSC code |
+| `stg_oece__awards` / `stg_oece__award_suppliers` / `stg_oece__award_exchange_rates` | award / award × supplier / award |
+| `stg_oece__contracts` / `stg_oece__contract_exchange_rates` | contract / contract |
+| `stg_mef__investments` / `stg_mef__closed_investments` | investment project |
+
+Data quality is enforced with dbt tests: key uniqueness (including composite
+keys, since OCDS `award_id` and `contract_id` repeat across processes),
+referential integrity through a custom `composite_relationships` test,
+accepted values, value ranges, source freshness, and a check that the active
+and closed MEF files never share a project code.
+
+Source quirks handled in staging:
+
+- `tender/value/amount_PEN` is 0 for ~5k tenders already in soles, so
+  `tender_amount_pen` uses the original amount for PEN tenders.
+- Casts are defensive (`to_numeric`, `to_timestamptz`, ... macros): malformed
+  values become NULL instead of failing the build.
+- MEF coordinates of `0, 0` become NULL; Spanish yes/no flags become booleans.
+- The active MEF file repeats a few projects with a technical file amount of
+  0 in one copy; staging keeps the row with the highest amount.
+- ~1k contracts reference an award missing from their process, and the source
+  truncates a few foreign tax IDs in the parties table; these are warning-level
+  tests that only fail above a threshold.
+- ~200 active investments report physical progress above 100% (warning).
+
+Run it against the local warehouse (dbt does not read `.env` itself):
+
+```bash
+cd dbt
+set -a && . ../.env && set +a
+export DBT_PROFILES_DIR=.
+uv run dbt deps
+uv run dbt build --select staging
+uv run dbt source freshness
+```
 
 ## Getting started
 
@@ -130,6 +183,7 @@ docker compose exec airflow-scheduler python -m public_spend.mef.pipeline  # --d
 uv sync
 uv run pre-commit install
 uv run ruff check . && uv run ruff format --check .
+uv run sqlfluff lint dbt/models dbt/tests
 uv run pytest                 # integration tests are skipped without a database
 ```
 
@@ -147,6 +201,7 @@ enforced by a `commit-msg` hook.
 
 ```
 ├── airflow/dags/          # Airflow DAGs (thin wrappers around src/)
+├── dbt/                   # dbt project: macros, staging models, tests
 ├── docker/                # Airflow image and Postgres init script
 ├── src/public_spend/      # Ingestion package
 │   ├── oece/              # index client, bundle reader, raw loader, entry points
