@@ -8,6 +8,9 @@ macro-paths: ["macros"]
 test-paths: ["tests"]
 clean-targets: ["target", "dbt_packages"]
 
+on-run-end:
+  - "{{ grant_schema_usage('marts', env_var('BI_READER_USER', 'bi_reader')) }}"
+
 models:
   public_spend:
     staging:
@@ -22,3 +25,6 @@ models:
     marts:
       +schema: marts
       +materialized: table
+      # Read-only access for BI tools (Metabase, Power BI).
+      +grants:
+        select: ["{{ env_var('BI_READER_USER', 'bi_reader') }}"]
