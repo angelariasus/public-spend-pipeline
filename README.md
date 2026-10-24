@@ -5,8 +5,8 @@ An end-to-end ELT pipeline that links Peru's public procurement contracts
 investment execution data from the Ministry of Economy and Finance (MEF), to
 measure how much is contracted versus how much is actually delivered.
 
-> Status: ingestion, dbt models, orchestration and Metabase dashboards are
-> done. A Power BI report on the same marts is planned.
+> Status: ingestion, dbt models, orchestration, Metabase dashboards and
+> documentation are done. A Power BI report on the same marts is planned.
 
 ![Public procurement overview dashboard](docs/images/metabase-procurement-overview.png)
 
@@ -21,15 +21,21 @@ measure how much is contracted versus how much is actually delivered.
 
 ## Architecture
 
-```
-OECE OCDS API ──┐                                                                       ┌─> Metabase
-                ├─> Airflow ─> Postgres `raw` ─> dbt `staging` ─> `intermediate` ─> `marts` ┤
-MEF CSVs ───────┘   (Python)   (as landed)       (typed, tested)  (PEN, bridges)   (star)   └─> Power BI (later)
+```mermaid
+flowchart LR
+    oece["OECE OCDS API<br/>monthly bulk ZIPs"] --> airflow
+    mef["MEF investment CSVs<br/>active + closed"] --> airflow
+    airflow["Airflow<br/>oece_ingest, mef_ingest"] --> raw[("raw<br/>as landed")]
+    raw --> dbt["Airflow<br/>dbt_build"]
+    dbt --> staging[("staging<br/>typed, tested")] --> intermediate[("intermediate<br/>soles, bridges")] --> marts[("marts<br/>star schema")]
+    marts --> metabase["Metabase"]
+    marts -.-> powerbi["Power BI (later)"]
 ```
 
 Three DAGs run the pipeline: `oece_ingest` and `mef_ingest` load `raw` every
 morning, and `dbt_build` starts once both have finished (asset-aware
-scheduling).
+scheduling). Details, the daily run and the star schema are in
+[docs/architecture.md](docs/architecture.md).
 
 | Layer          | Tool                                         |
 |----------------|----------------------------------------------|
@@ -191,6 +197,8 @@ What the marts show with the 2024-01 to 2026-10 data:
   errors: one entity charged S/ 1.6 billion of works to the code of a
   S/ 0.8 million sports court.
 
+More in [docs/findings.md](docs/findings.md).
+
 Run it against the local warehouse (dbt does not read `.env` itself):
 
 ```bash
@@ -229,6 +237,29 @@ Re-running it after editing a file updates Metabase in place.
 | Investment projects: contracted vs delivered | Contracted vs accrued spend by level of government; physical progress of projects with contracts; lagging projects; contracts above the project cost |
 
 ![Investment projects dashboard](docs/images/metabase-investment-vs-procurement.png)
+
+## Documentation
+
+| Document | Content |
+|----------|---------|
+| [docs/architecture.md](docs/architecture.md) | Pipeline diagram, daily run, warehouse layers, star schema |
+| [docs/data-dictionary.md](docs/data-dictionary.md) | Every column of the marts, generated from the dbt manifest and catalog |
+| [docs/design-decisions.md](docs/design-decisions.md) | Why the pipeline is built this way, and what it cannot tell you |
+| [docs/findings.md](docs/findings.md) | What the data shows for 2024-2026 |
+
+The dbt documentation site (lineage graph, tests, descriptions) is generated
+from the same files:
+
+```bash
+cd dbt && uv run dbt docs generate && uv run dbt docs serve
+```
+
+Regenerate the data dictionary after changing a mart or its descriptions; it
+fails if any mart column is left undescribed:
+
+```bash
+uv run python -m public_spend.docs.data_dictionary
+```
 
 ## Getting started
 
@@ -291,11 +322,12 @@ enforced by a `commit-msg` hook.
 ├── bi/metabase/questions/ # SQL behind every Metabase question
 ├── dbt/                   # dbt project: macros, staging/intermediate/marts models, tests
 ├── docker/                # Airflow image and Postgres init scripts
-├── docs/images/           # dashboard screenshots
+├── docs/                  # architecture, data dictionary, design decisions, findings
 ├── src/public_spend/      # Python package: ingestion and Metabase provisioning
 │   ├── oece/              # index client, bundle reader, raw loader, entry points
 │   ├── mef/               # conditional download, snapshot loader, entry point
-│   └── metabase/          # API client, dashboard definitions, provisioning
+│   ├── metabase/          # API client, dashboard definitions, provisioning
+│   └── docs/              # data dictionary generator
 ├── tests/                 # unit and integration tests
 └── docker-compose.yml
 ```
