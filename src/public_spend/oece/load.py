@@ -19,6 +19,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from public_spend.config import Period
+from public_spend.db import lock_ddl
 from public_spend.oece.archive import iter_rows
 
 LOAD_LOG_TABLE = "oece_load_log"
@@ -31,6 +32,7 @@ def raw_table(table: str) -> str:
 def ensure_raw_tables(conn: psycopg.Connection, schema: str, tables: Iterable[str]) -> None:
     """Create the raw schema, the load log and one table per OCDS table."""
     with conn.transaction():
+        lock_ddl(conn)
         conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
         conn.execute(
             sql.SQL(
