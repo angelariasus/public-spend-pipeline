@@ -10,7 +10,10 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pendulum
-from airflow.sdk import dag, task
+from airflow.sdk import Asset, dag, task
+
+# Updated by every successful load; schedules the dbt_build DAG.
+RAW_OECE = Asset("raw_oece")
 
 
 @dag(
@@ -32,7 +35,7 @@ def oece_ingest():
         return [entry.to_dict() for entry in plan(Settings.from_env())]
 
     # Two concurrent downloads keep the load on the public portal modest.
-    @task(max_active_tis_per_dag=2)
+    @task(max_active_tis_per_dag=2, outlets=[RAW_OECE])
     def load_period(entry: dict[str, str]) -> dict:
         from public_spend.config import Settings
         from public_spend.oece.index import FileEntry

@@ -11,7 +11,10 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pendulum
-from airflow.sdk import dag, task
+from airflow.sdk import Asset, dag, task
+
+# Updated by every successful load; schedules the dbt_build DAG.
+RAW_MEF = Asset("raw_mef")
 
 
 @dag(
@@ -24,7 +27,7 @@ from airflow.sdk import dag, task
     tags=["ingestion", "mef"],
 )
 def mef_ingest():
-    @task
+    @task(outlets=[RAW_MEF])
     def load_dataset(name: str) -> dict:
         from public_spend.config import Settings
         from public_spend.mef.pipeline import ingest
