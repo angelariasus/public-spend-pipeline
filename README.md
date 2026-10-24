@@ -1,333 +1,404 @@
-# public-spend-pipeline
+<div align="center">
 
-An end-to-end ELT pipeline that links Peru's public procurement contracts
-(OECE / SEACE, published in the Open Contracting Data Standard) with public
-investment execution data from the Ministry of Economy and Finance (MEF), to
-measure how much is contracted versus how much is actually delivered.
+# Public Spend Pipeline
 
-> Status: ingestion, dbt models, orchestration, Metabase dashboards and
-> documentation are done. A Power BI report on the same marts is planned.
+**Contracted vs. delivered: an end-to-end ELT pipeline that links Peru's public
+procurement contracts with the execution of public investment projects.**
 
-![Public procurement overview dashboard](docs/images/metabase-procurement-overview.png)
+[![CI](https://github.com/angelariasus/public-spend-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/angelariasus/public-spend-pipeline/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-FE5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 
-## Questions this project answers
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Apache Airflow](https://img.shields.io/badge/Apache%20Airflow-3.3-017CEE?logo=apacheairflow&logoColor=white)](https://airflow.apache.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![dbt](https://img.shields.io/badge/dbt--core-1.12-FF694B)](https://www.getdbt.com/)
+[![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![Metabase](https://img.shields.io/badge/Metabase-0.64-509EE3?logo=metabase&logoColor=white)](https://www.metabase.com/)
+[![Power BI](https://img.shields.io/badge/Power%20BI-planned-F2C811)](#roadmap)
+
+[![uv](https://img.shields.io/badge/uv-DE5FE9?logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
+[![Ruff](https://img.shields.io/badge/Ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
+[![SQLFluff](https://img.shields.io/badge/SQLFluff-linted-29B6F6)](https://sqlfluff.com/)
+[![pytest](https://img.shields.io/badge/pytest-0A9EDC?logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![pre-commit](https://img.shields.io/badge/pre--commit-FAB040?logo=precommit&logoColor=black)](https://pre-commit.com/)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
+
+![Public procurement overview dashboard](docs/images/metabase-hero.png)
+
+</div>
+
+## Table of contents
+
+- [Overview](#overview)
+- [Key findings](#key-findings)
+- [Architecture](#architecture)
+- [Tech stack](#tech-stack)
+- [Data sources](#data-sources)
+- [How it works](#how-it-works)
+- [Data model](#data-model)
+- [Data quality](#data-quality)
+- [Dashboards](#dashboards)
+- [Getting started](#getting-started)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Project structure](#project-structure)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+- [License and data attribution](#license-and-data-attribution)
+
+## Overview
+
+Peru publishes every public contract in the Open Contracting Data Standard
+(OCDS) through OECE, and every public investment project, with its cost,
+spend and physical progress, through the Ministry of Economy and Finance
+(MEF). The two datasets share a project code but are published separately,
+so there is no direct way to see whether the money contracted for a project
+turns into delivered works.
+
+This project builds that link. It ingests both sources daily, models them in a
+tested star schema and serves dashboards that answer:
 
 1. Which public entities award the most money, and in which categories?
-2. How concentrated are awards among suppliers, per entity?
-3. For each public investment project: how much was contracted versus what
-   MEF reports as spent and physically completed?
-4. Which projects have large contracted amounts but little progress?
-5. How does all of the above vary by region, level of government and month?
+2. How concentrated are each entity's awards among its suppliers?
+3. For each investment project, how much was contracted versus what MEF
+   reports as spent and physically completed?
+4. Which projects have large contracts but little physical progress?
+5. How does all of this vary by region, level of government and month?
+
+**Scope:** contracting processes published from January 2024 to October 2026
+(34 monthly OECE files) and the full MEF snapshots of active and closed
+investments.
+
+## Key findings
+
+| Metric | Detail |
+|--------|--------|
+| **S/ 222 billion** awarded | 184k awards by 2,992 entities to 81k suppliers; works take 52% of the money |
+| **60%** of the amount goes to consortia | with only 22% of the awards; companies win 36% with 59% of the awards |
+| **95%** of investment codes matched | 31.8k projects found in MEF, with S/ 93 billion contracted |
+| **459** lagging projects | S/ 1M+ contracted over a year ago, under 25% physical progress: S/ 14 billion |
+| **354** projects contracted above 150% of cost | mostly tagging errors in the source, e.g. S/ 1.6 billion of works charged to a S/ 0.8 million sports court |
+
+Full analysis in [docs/findings.md](docs/findings.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    oece["OECE OCDS API<br/>monthly bulk ZIPs"] --> airflow
-    mef["MEF investment CSVs<br/>active + closed"] --> airflow
-    airflow["Airflow<br/>oece_ingest, mef_ingest"] --> raw[("raw<br/>as landed")]
+    oece["OECE OCDS API<br/>monthly bulk ZIPs"] --> ingest
+    mef["MEF investment CSVs<br/>active + closed"] --> ingest
+    ingest["Airflow<br/>oece_ingest · mef_ingest"] --> raw[("raw<br/>as landed")]
     raw --> dbt["Airflow<br/>dbt_build"]
     dbt --> staging[("staging<br/>typed, tested")] --> intermediate[("intermediate<br/>soles, bridges")] --> marts[("marts<br/>star schema")]
     marts --> metabase["Metabase"]
-    marts -.-> powerbi["Power BI (later)"]
+    marts -.-> powerbi["Power BI<br/>planned"]
 ```
 
-Three DAGs run the pipeline: `oece_ingest` and `mef_ingest` load `raw` every
-morning, and `dbt_build` starts once both have finished (asset-aware
-scheduling). Details, the daily run and the star schema are in
+Three Airflow DAGs run the pipeline. `oece_ingest` (09:30 Lima time) and
+`mef_ingest` (10:00) load the `raw` schema; each successful load emits a data
+asset, and `dbt_build` starts once both assets have been updated (asset-aware
+scheduling), checks source freshness and builds every model with its tests.
+Metabase reads the `marts` schema through a read-only role.
+
+Everything runs locally with Docker Compose. The daily run step by step, the
+warehouse layers and the full entity-relationship diagram are in
 [docs/architecture.md](docs/architecture.md).
 
-| Layer          | Tool                                         |
-|----------------|----------------------------------------------|
-| Orchestration  | Apache Airflow 3.3 (LocalExecutor)           |
-| Ingestion      | Python (`requests`, `psycopg`)               |
-| Warehouse      | PostgreSQL 16                                |
-| Transformation | dbt-core 1.12 + dbt_utils                    |
-| BI             | Metabase 0.64 (dashboards as code), Power BI (later) |
-| Tooling        | uv, ruff, sqlfluff, pytest, pre-commit, GitHub Actions |
+## Tech stack
+
+| Layer | Technology | Role |
+|-------|------------|------|
+| Orchestration | Apache Airflow 3.3 (LocalExecutor) | Daily ingestion DAGs with dynamic task mapping; asset-aware dbt runs |
+| Ingestion | Python 3.12, `requests`, `psycopg` 3 | Streaming downloads, content hashing, `COPY` into Postgres |
+| Warehouse | PostgreSQL 16 | `raw`, `staging`, `intermediate` and `marts` schemas |
+| Transformation | dbt-core 1.12, dbt_utils | 26 models, 97 data tests, source freshness, grants |
+| BI | Metabase 0.64 | Two dashboards provisioned as code through the API |
+| Infrastructure | Docker Compose | Postgres, Airflow (API server, scheduler, DAG processor), Metabase |
+| Quality | pytest, Ruff, SQLFluff, pre-commit | Unit and integration tests, Python and SQL linting, commit hooks |
+| CI | GitHub Actions | Lint, `dbt parse`, tests against a Postgres service, Compose validation |
 
 ## Data sources
 
-| Source | Access | Notes |
-|--------|--------|-------|
-| [OECE Open Contracting portal](https://contratacionesabiertas.oece.gob.pe/descargas) | `GET /api/v1/files` (paginated index) and `GET /api/v1/file/seace_v3/csv/{year}/{month}/` (ZIP with one CSV per OCDS table) | CC BY 4.0. Refreshed daily. |
-| [MEF public investment detail](https://www.datosabiertos.gob.pe/dataset/informaci%C3%B3n-de-inversiones-p%C3%BAblicas-2001%E2%80%932026-mef) | Single CSV (~250 MB, ~150k active projects, 68 columns) | Full snapshot. Supports `ETag` / `Last-Modified`. |
-| [MEF closed investments](https://www.datosabiertos.gob.pe/dataset/inversiones-en-estado-cerrado-registradas-en-el-banco-de-inversiones) | Single CSV (~120 MB, ~120k closed projects, 57 columns) | Same server and behaviour; disjoint from the active file. |
+| Source | Content | Access |
+|--------|---------|--------|
+| [OECE open contracting portal](https://contratacionesabiertas.oece.gob.pe/descargas) | Processes, parties, bidders, items, awards, contracts and exchange rates in OCDS | Paginated file index and one ZIP of CSVs per month; refreshed daily |
+| [MEF public investments](https://www.datosabiertos.gob.pe/dataset/informaci%C3%B3n-de-inversiones-p%C3%BAblicas-2001%E2%80%932026-mef) | ~150k active investment projects, 68 columns: cost, accrued spend, physical progress | Single CSV (~250 MB) with `ETag` / `Last-Modified` |
+| [MEF closed investments](https://www.datosabiertos.gob.pe/dataset/inversiones-en-estado-cerrado-registradas-en-el-banco-de-inversiones) | ~120k closed projects, 57 columns | Single CSV (~120 MB), disjoint from the active file |
 
 The sources join on the investment project code: OCDS
 `planning/budget/projectID` (sometimes a comma-separated list) equals MEF
-`CODIGO_UNICO`. The active-projects file alone matches only 77% of the 2024
-project codes, because finished projects move to the closed-investments file;
-with both files, 95% of the 2024–2026 codes match.
+`CODIGO_UNICO`. The active file alone matched only 77% of the 2024 codes,
+because finished projects move to the closed file; with both, 95% match.
 
-## OECE ingestion
+## How it works
 
-The `oece_ingest` DAG runs daily at 09:30 Lima time, after the portal
-refreshes its files.
+### Ingestion
 
-1. `plan_periods` reads the whole file index, keeps `seace_v3` months between
-   `OECE_START_PERIOD` and `OECE_END_PERIOD`, and creates the raw tables.
-2. `load_period` runs once per month (dynamic task mapping, two at a time to
-   be gentle with the portal). It downloads the ZIP, hashes the content of the
-   selected CSVs and compares it with the last load:
-   - unchanged content: the month is skipped;
-   - new or changed content: the month is replaced in a single transaction.
+**OECE.** `plan_periods` reads the portal's file index and keeps the months in
+scope; `load_period` runs once per month as a mapped task, two at a time. Each
+task downloads the month's ZIP, hashes the content of the selected CSVs and
+skips the month if nothing changed. Otherwise it replaces the month in a
+single transaction. Rows land as JSONB documents, because OCDS columns vary
+between months.
 
-Design decisions:
+**MEF.** One mapped task per file sends the stored `ETag` and `Last-Modified`;
+a `304 Not Modified` ends the task without downloading. New content is
+streamed, validated and loaded with `TRUNCATE` + `COPY` in one transaction.
 
-- **Rows land as JSONB documents** in `raw.oece_<table>`, one per CSV row.
-  OCDS columns vary from month to month, so this avoids schema migrations at
-  load time; dbt staging models select and type the fields they need.
-- **Change detection uses a content hash.** The portal regenerates every
-  monthly file daily, so neither the index timestamp nor the ZIP checksum it
-  publishes says whether the data changed.
-- **Loads are idempotent and atomic.** A month is deleted and reinserted in one
-  transaction; re-running never duplicates rows and a failed load keeps the
-  previous data. Every load is recorded in `raw.oece_load_log`.
-- **A browser User-Agent is sent** because the portals answer HTTP 418 to
-  generic clients.
+Both loaders are idempotent and atomic: re-running never duplicates rows, a
+failed load keeps the previous data, DDL is serialized with a Postgres
+advisory lock, and every load is logged with its hash and row count.
 
-Tables loaded by default (configurable with `OECE_TABLES`): `records`,
-`com_parties`, `com_ten_items`, `com_ten_ite_additionalclassific`,
-`com_ten_tenderers`, `com_awards`, `com_awa_suppliers`,
-`com_awa_val_exchangerates`, `com_contracts`, `com_con_val_exchangerates`.
-The exchange-rate tables matter: about 2% of awards and contracts are in USD,
-EUR or other currencies.
+### Transformation
 
-## MEF ingestion
+| Layer | Materialization | What it does |
+|-------|-----------------|--------------|
+| `staging` | indexed tables | One model per source table: English names, defensive casts, source quirks fixed |
+| `intermediate` | views | Converts awards and contracts to soles; bridges processes and investment projects; unions active and closed MEF files |
+| `marts` | indexed tables | Star schema and analytical marts read by BI tools |
 
-The `mef_ingest` DAG runs daily at 10:00 Lima time with one mapped task per
-dataset (`investments` → `raw.mef_investments`, `closed_investments` →
-`raw.mef_closed_investments`). Each task:
+Two transformations carry most of the analytical weight:
 
-1. Sends the `ETag` / `Last-Modified` of its previous load; on HTTP 304 it ends
-   without downloading anything.
-2. Otherwise downloads the CSV, hashing it on the way. If the content hash
-   matches the last load, only the stored validators are refreshed.
-3. On new content validates the header and replaces its table with
-   `TRUNCATE` + `COPY` in one transaction.
+- **Currency conversion.** About 2% of awards and contracts are in USD, EUR or
+  other currencies. Amounts are converted with the rate reported by the
+  record, then the rate of the contract's award, then the month's average for
+  the currency; `exchange_rate_source` records which one applied.
+- **Process-project bridge.** Comma-separated budget codes are exploded into
+  one row per process and project. A process funding several projects (1% of
+  them) is split equally, and a test checks that no money is lost or
+  duplicated.
 
-Design decisions:
+The reasoning behind these and other choices, with the alternatives that were
+rejected, is in [docs/design-decisions.md](docs/design-decisions.md).
 
-- **Typed text columns, not JSONB.** This is one stable table, so columns are
-  created from the CSV header; dbt casts them to proper types.
-- **The table is never dropped.** dbt views depend on it, so new source columns
-  are added with `ALTER TABLE` and removed ones are left NULL.
-- **Every load is appended to `raw.mef_load_log`** with its hash, validators,
-  row count and column list.
-- **DDL is serialized with a Postgres advisory lock**, because parallel tasks
-  running `CREATE ... IF NOT EXISTS` on the same object can fail.
-
-## dbt models
-
-The dbt project lives in `dbt/` and builds into three schemas: `staging`,
-`intermediate` and `marts`.
-
-**Staging** has one model per source table. Models rename fields to English
-snake_case, cast text to numbers, dates and booleans, and are materialized as
-indexed tables because they extract from multi-million-row JSONB tables.
+## Data model
 
 | Model | Grain |
 |-------|-------|
-| `stg_oece__records` | contracting process (`ocid`) |
-| `stg_oece__parties` | organization × process |
-| `stg_oece__tenderers` | bidder × process |
-| `stg_oece__tender_items` / `stg_oece__tender_item_classifications` | tender item / item × UNSPSC code |
-| `stg_oece__awards` / `stg_oece__award_suppliers` / `stg_oece__award_exchange_rates` | award / award × supplier / award |
-| `stg_oece__contracts` / `stg_oece__contract_exchange_rates` | contract / contract |
-| `stg_mef__investments` / `stg_mef__closed_investments` | investment project |
-
-Data quality is enforced with dbt tests: key uniqueness (including composite
-keys, since OCDS `award_id` and `contract_id` repeat across processes),
-referential integrity through a custom `composite_relationships` test,
-accepted values, value ranges, source freshness, and a check that the active
-and closed MEF files never share a project code.
-
-Source quirks handled in staging:
-
-- `tender/value/amount_PEN` is 0 for ~5k tenders already in soles, so
-  `tender_amount_pen` uses the original amount for PEN tenders.
-- Casts are defensive (`to_numeric`, `to_timestamptz`, ... macros): malformed
-  values become NULL instead of failing the build.
-- MEF coordinates of `0, 0` become NULL; Spanish yes/no flags become booleans.
-- The active MEF file repeats a few projects with a technical file amount of
-  0 in one copy; staging keeps the row with the highest amount.
-- ~1k contracts reference an award missing from their process, and the source
-  truncates a few foreign tax IDs in the parties table; these are warning-level
-  tests that only fail above a threshold.
-- ~200 active investments report physical progress above 100% (warning).
-
-**Intermediate** models (views) do the cross-table work:
-
-| Model | Purpose |
-|-------|---------|
-| `int_oece__exchange_rates_monthly` | Average rate to soles per currency and month, from every award and contract that reports one |
-| `int_oece__awards_pen` / `int_oece__contracts_pen` | Amounts in soles. Rate chain: reported by the record → reported by the contract's award → month average → currency average; `exchange_rate_source` says which one was used |
-| `int_oece__process_projects` | Bridge process × investment project, exploding comma-separated budget codes; amounts are split equally among a process's projects (99% fund one) |
-| `int_mef__investments_unioned` | Active and closed MEF investments with their shared columns |
-
-**Marts** (tables) form a star schema plus two analytical marts:
-
-| Model | Grain |
-|-------|-------|
-| `dim_date` | day (2000–2030) |
-| `dim_entity` | buying entity (latest name and address) |
-| `dim_supplier` | supplier, typed as company, individual, consortium or foreign from its ID |
+| `dim_date` | day, 2000–2030 |
+| `dim_entity` | buying entity, with its latest name and address |
+| `dim_supplier` | supplier, typed as company, individual, consortium or foreign from its tax ID |
 | `dim_investment_project` | MEF investment project, active or closed |
 | `dim_procurement_process` | contracting process |
 | `fct_award` | award, in original currency and soles |
 | `fct_contract` | contract, in original currency and soles |
-| `mart_investment_vs_procurement` | investment project: tendered, awarded and contracted amounts next to MEF cost, accrued spend and physical progress, with `is_lagging` and `is_contracted_above_cost` flags |
+| `mart_investment_vs_procurement` | investment project: tendered, awarded and contracted amounts next to MEF cost, accrued spend and progress, with `is_lagging` and `is_contracted_above_cost` flags |
 | `mart_supplier_concentration` | entity × year: supplier count, top-supplier and top-5 shares, Herfindahl-Hirschman Index |
 
-Facts carry single-column surrogate keys (`award_key`, `contract_key`) so BI
-tools such as Power BI can relate them without composite keys. A singular test
-checks that splitting multi-project processes neither loses nor duplicates
-money.
+Facts carry single-column surrogate keys (`award_key`, `contract_key`)
+because OCDS award and contract IDs are only unique within a process. Every
+column is described in the [data dictionary](docs/data-dictionary.md).
 
-What the marts show with the 2024-01 to 2026-10 data:
+## Data quality
 
-- S/ 222 billion awarded; 2% of awards and contracts are in foreign currency
-  (S/ 7.9 billion after conversion).
-- 33.5k investment projects received contracts through SEACE; 95% of them are
-  found in the MEF files.
-- 459 active projects signed at least S/ 1 million in contracts over a year
-  ago and still report less than 25% physical progress (S/ 14 billion).
-- 354 projects have contracts above 150% of their cost. Many are tagging
-  errors: one entity charged S/ 1.6 billion of works to the code of a
-  S/ 0.8 million sports court.
-
-More in [docs/findings.md](docs/findings.md).
-
-Run it against the local warehouse (dbt does not read `.env` itself):
-
-```bash
-cd dbt
-set -a && . ../.env && set +a
-export DBT_PROFILES_DIR=.
-uv run dbt deps
-uv run dbt build
-uv run dbt source freshness
-```
-
-In the stack, the `dbt_build` DAG runs the same commands. dbt is installed in
-its own virtualenv inside the Airflow image (its pins would conflict with
-Airflow's), and each run copies the read-only `dbt/` mount to a temporary
-directory so it never writes into the repository. The ingestion tasks emit the
-`raw_oece` and `raw_mef` assets; `dbt_build` emits `marts` for the BI layer.
+- **97 dbt data tests** on every build: key uniqueness, including composite
+  keys; referential integrity through a custom `composite_relationships` test;
+  accepted values; value ranges; and singular tests, such as checking that the
+  active and closed MEF files never share a project code.
+- **Source freshness** gates the build: `dbt_build` stops if a raw source is
+  older than its threshold.
+- **Known source defects are measured, not hidden.** Contracts that reference
+  a missing award, truncated tax IDs and progress above 100% are warning-level
+  tests that only fail above a threshold.
+- **The documentation is checked too.** The data dictionary generator fails
+  if any mart column lacks a description.
+- **Python is tested** with unit tests (HTTP mocked with `responses`) and
+  integration tests that each run in a throwaway Postgres schema.
 
 ## Dashboards
 
-Metabase reads only the `marts` schema, through a read-only role
-(`BI_READER_USER`). dbt grants that role `SELECT` on every mart it builds and
-`USAGE` on the schema in an `on-run-end` hook, so access survives each rebuild.
-Power BI will connect with the same role.
+Metabase connects as `bi_reader`, a role that can only read `marts`. dbt
+grants it access on every build, so rebuilds never break the dashboards.
 
 The dashboards are code. Each question is a SQL file in
-`bi/metabase/questions/`, and `src/public_spend/metabase/content.py` declares
-the chart type, formatting and position of every tile. The
-`metabase-provision` service applies them through the Metabase API: it
-completes the first-run setup, connects the warehouse, and creates or updates
-the questions and dashboards by name, archiving questions that were removed.
-Re-running it after editing a file updates Metabase in place.
+`bi/metabase/questions/`, linted in CI, and
+`src/public_spend/metabase/content.py` declares the chart type, formatting and
+position of every tile. The `metabase-provision` service applies them through
+the Metabase API: it completes the first-run setup, connects the warehouse and
+creates or updates every question and dashboard by name. Running it again after
+an edit updates Metabase in place.
 
 | Dashboard | Answers |
 |-----------|---------|
-| Public procurement overview | Awarded amount by month, category, entity and department; supplier types; supplier concentration (HHI) per entity and year |
-| Investment projects: contracted vs delivered | Contracted vs accrued spend by level of government; physical progress of projects with contracts; lagging projects; contracts above the project cost |
+| **Public procurement overview** | Awarded amount by month, category, entity and department; supplier types; supplier concentration per entity and year |
+| **Investment projects: contracted vs delivered** | Contracted vs accrued spend by level of government; physical progress; lagging projects; contracts above project cost |
+
+<details>
+<summary><b>Public procurement overview</b> (full dashboard)</summary>
+
+![Public procurement overview dashboard](docs/images/metabase-procurement-overview.png)
+
+</details>
+
+<details>
+<summary><b>Investment projects: contracted vs delivered</b> (full dashboard)</summary>
 
 ![Investment projects dashboard](docs/images/metabase-investment-vs-procurement.png)
 
-## Documentation
-
-| Document | Content |
-|----------|---------|
-| [docs/architecture.md](docs/architecture.md) | Pipeline diagram, daily run, warehouse layers, star schema |
-| [docs/data-dictionary.md](docs/data-dictionary.md) | Every column of the marts, generated from the dbt manifest and catalog |
-| [docs/design-decisions.md](docs/design-decisions.md) | Why the pipeline is built this way, and what it cannot tell you |
-| [docs/findings.md](docs/findings.md) | What the data shows for 2024-2026 |
-
-The dbt documentation site (lineage graph, tests, descriptions) is generated
-from the same files:
-
-```bash
-cd dbt && uv run dbt docs generate && uv run dbt docs serve
-```
-
-Regenerate the data dictionary after changing a mart or its descriptions; it
-fails if any mart column is left undescribed:
-
-```bash
-uv run python -m public_spend.docs.data_dictionary
-```
+</details>
 
 ## Getting started
 
-Requirements: Docker with ~6 GB of memory, and [uv](https://docs.astral.sh/uv/)
-for local development.
+### Prerequisites
+
+- Docker with Docker Compose and about 6 GB of memory for the containers
+- [uv](https://docs.astral.sh/uv/), only for local development
+
+### Run the stack
 
 ```bash
-cp .env.example .env        # then replace every change-me value
+git clone https://github.com/angelariasus/public-spend-pipeline.git
+cd public-spend-pipeline
+cp .env.example .env          # replace every change-me value
 docker compose up -d --build
 ```
 
-- Airflow UI: <http://localhost:8080> (user and password from `.env`)
-- Metabase: <http://localhost:3000> (`METABASE_ADMIN_EMAIL` and
-  `METABASE_ADMIN_PASSWORD` from `.env`)
-- Warehouse: `postgresql://<WAREHOUSE_USER>:<WAREHOUSE_PASSWORD>@localhost:5433/warehouse`
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Airflow | <http://localhost:8080> | `AIRFLOW_ADMIN_USER` / `AIRFLOW_ADMIN_PASSWORD` |
+| Metabase | <http://localhost:3000> | `METABASE_ADMIN_EMAIL` / `METABASE_ADMIN_PASSWORD` |
+| Warehouse | `localhost:5433`, database `warehouse` | `WAREHOUSE_USER` (read-write) or `BI_READER_USER` (read-only) |
 
-The dashboards are empty until the first `dbt_build` run creates the marts.
-To re-apply them after editing a question or the layout:
+### First load
+
+1. In Airflow, unpause `oece_ingest`, `mef_ingest` and `dbt_build`, then
+   trigger the two ingestion DAGs. The first OECE load downloads 34 monthly
+   files and takes the longest; later runs only reload months that changed.
+2. When both finish, `dbt_build` starts on its own and builds the marts.
+3. Open Metabase. The dashboards were created by `metabase-provision` and fill
+   in once the marts exist.
+
+Loads can also be run from the command line:
+
+```bash
+docker compose exec airflow-scheduler python -m public_spend.oece.pipeline --period 2024-01
+docker compose exec airflow-scheduler python -m public_spend.mef.pipeline --dataset closed_investments
+```
+
+To re-apply the dashboards after editing a question or the layout:
 
 ```bash
 docker compose up metabase-provision
 ```
 
-The Postgres init scripts only run on an empty data volume. On a volume
-created before the BI roles existed, create them once with
-`docker compose exec postgres bash /docker-entrypoint-initdb.d/02-create-bi-roles.sh`.
+> The Postgres init scripts only run on an empty data volume. On a volume
+> created before the BI roles existed, create them once with
+> `docker compose exec postgres bash /docker-entrypoint-initdb.d/02-create-bi-roles.sh`.
 
-Enable the `oece_ingest`, `mef_ingest` and `dbt_build` DAGs in the UI, or run
-the loads from the command line:
+## Configuration
 
-```bash
-docker compose exec airflow-scheduler python -m public_spend.oece.pipeline --period 2024-01
-docker compose exec airflow-scheduler python -m public_spend.mef.pipeline  # --dataset closed_investments
-```
+All settings come from `.env`; [.env.example](.env.example) lists them with
+safe placeholders.
+
+| Variable | Purpose |
+|----------|---------|
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST_PORT` | Postgres superuser and the host port (default `5433`) |
+| `WAREHOUSE_DB`, `WAREHOUSE_USER`, `WAREHOUSE_PASSWORD` | Warehouse database and its owner, used by ingestion and dbt |
+| `BI_READER_USER`, `BI_READER_PASSWORD` | Read-only role for BI tools |
+| `AIRFLOW_ADMIN_USER`, `AIRFLOW_ADMIN_PASSWORD` | Airflow UI login |
+| `AIRFLOW_JWT_SECRET`, `AIRFLOW_FERNET_KEY` | Airflow API tokens and encryption of stored connections |
+| `METABASE_DB`, `METABASE_DB_USER`, `METABASE_DB_PASSWORD` | Metabase application database |
+| `METABASE_ENCRYPTION_KEY` | Encrypts the credentials Metabase stores |
+| `METABASE_ADMIN_EMAIL`, `METABASE_ADMIN_PASSWORD` | Admin account created by `metabase-provision` |
+| `OECE_START_PERIOD`, `OECE_END_PERIOD` | Months to load (`YYYY-MM`); an empty end means the latest published month |
 
 ## Development
 
 ```bash
-uv sync
-uv run pre-commit install
+uv sync                       # Python, dbt and tooling
+uv run pre-commit install     # lint on commit, Conventional Commits on commit-msg
+
 uv run ruff check . && uv run ruff format --check .
 uv run sqlfluff lint dbt/models dbt/tests bi/metabase/questions
 uv run pytest                 # integration tests are skipped without a database
 ```
 
-Integration tests need a PostgreSQL database; each test uses a throwaway
-schema:
+Integration tests need a Postgres database; each test creates and drops its
+own schema:
 
 ```bash
 TEST_DATABASE_URL=postgresql://warehouse:<password>@localhost:5433/warehouse uv run pytest
 ```
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
-enforced by a `commit-msg` hook.
+Run dbt from the host against the local warehouse (dbt does not read `.env`
+itself):
+
+```bash
+cd dbt
+set -a && . ../.env && set +a
+export DBT_PROFILES_DIR=.
+uv run dbt deps && uv run dbt build
+uv run dbt docs generate && uv run dbt docs serve   # lineage graph and docs site
+```
+
+After changing a mart or its descriptions, regenerate the data dictionary:
+
+```bash
+uv run python -m public_spend.docs.data_dictionary
+```
+
+The [CI workflow](.github/workflows/ci.yml) runs on every push and pull request
+with four jobs: lint (Ruff and SQLFluff), `dbt parse`, pytest against a
+Postgres service, and Docker Compose validation. Commits follow
+[Conventional Commits](https://www.conventionalcommits.org/).
 
 ## Project structure
 
 ```
-├── airflow/dags/          # Airflow DAGs (thin wrappers around src/)
-├── bi/metabase/questions/ # SQL behind every Metabase question
-├── dbt/                   # dbt project: macros, staging/intermediate/marts models, tests
-├── docker/                # Airflow image and Postgres init scripts
-├── docs/                  # architecture, data dictionary, design decisions, findings
-├── src/public_spend/      # Python package: ingestion and Metabase provisioning
-│   ├── oece/              # index client, bundle reader, raw loader, entry points
-│   ├── mef/               # conditional download, snapshot loader, entry point
-│   ├── metabase/          # API client, dashboard definitions, provisioning
-│   └── docs/              # data dictionary generator
-├── tests/                 # unit and integration tests
+public-spend-pipeline/
+├── airflow/dags/              # oece_ingest, mef_ingest, dbt_build
+├── bi/metabase/questions/     # SQL behind every Metabase question
+├── dbt/
+│   ├── macros/                # defensive casts, OCDS field access, grants
+│   ├── models/
+│   │   ├── staging/           # one model per source table
+│   │   ├── intermediate/      # currency conversion, bridges, unions
+│   │   └── marts/             # core star schema + analytics marts
+│   └── tests/                 # generic and singular tests
+├── docker/                    # Airflow image (with a dbt virtualenv), Postgres init scripts
+├── docs/                      # architecture, data dictionary, design decisions, findings
+├── src/public_spend/
+│   ├── oece/                  # index client, ZIP reader, raw loader
+│   ├── mef/                   # conditional download, snapshot loader
+│   ├── metabase/              # API client, dashboard definitions, provisioning
+│   └── docs/                  # data dictionary generator
+├── tests/                     # unit and integration tests
 └── docker-compose.yml
 ```
+
+## Documentation
+
+| Document | Content |
+|----------|---------|
+| [Architecture](docs/architecture.md) | Pipeline diagram, daily run, warehouse layers, star schema |
+| [Data dictionary](docs/data-dictionary.md) | Every column of the marts, generated from dbt |
+| [Design decisions](docs/design-decisions.md) | Why the pipeline is built this way, and its known limitations |
+| [Findings](docs/findings.md) | What the data shows for 2024–2026 |
+
+## Roadmap
+
+- [x] OECE and MEF ingestion with idempotent, atomic loads
+- [x] dbt staging, intermediate and marts with data tests
+- [x] Orchestration with asset-aware scheduling
+- [x] Metabase dashboards as code
+- [x] Documentation and data dictionary
+- [ ] Power BI report on the same marts, through the read-only role
+- [ ] Map of projects by district (MEF publishes coordinates and ubigeo codes)
+
+## License and data attribution
+
+The code is released under the [MIT License](LICENSE).
+
+The data is not part of this repository; the pipeline downloads it from its
+publishers:
+
+- Procurement data: **Organismo Especializado para las Contrataciones Públicas
+  Eficientes (OECE)**, [Contrataciones Abiertas](https://contratacionesabiertas.oece.gob.pe/),
+  published under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- Investment data: **Ministerio de Economía y Finanzas (MEF)**, Banco de
+  Inversiones, published on [Plataforma Nacional de Datos Abiertos](https://www.datosabiertos.gob.pe/)
+  under its terms of use.
+
+Figures in this repository are derived from those sources and are not official
+statistics of either institution.
