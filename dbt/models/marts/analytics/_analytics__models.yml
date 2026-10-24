@@ -1,0 +1,59 @@
+version: 2
+
+models:
+  - name: mart_investment_vs_procurement
+    description: >
+      One row per investment project funded by a contracting process in the
+      loaded periods. Compares the amounts tendered, awarded and contracted
+      through SEACE with MEF's updated cost, accrued spend and physical
+      progress. Amounts of processes that fund several projects are split
+      equally among them.
+    columns:
+      - name: project_code
+        data_tests: [unique, not_null]
+      - name: is_matched_in_mef
+        description: False when the code is in neither MEF file (MEF columns are NULL).
+      - name: contracted_to_cost_pct
+        description: Contracted amount as a percentage of the project's updated cost.
+      - name: accrued_to_contracted_pct
+        description: >
+          MEF accrued spend as a percentage of the contracted amount. Accrued
+          spend covers the whole project life, including contracts signed
+          before the loaded periods, so values above 100 are expected.
+      - name: is_contracted_above_cost
+        description: >
+          Contracted amount above 150% of the updated cost. Usually a process
+          tagged with the wrong project code (e.g. an entity reusing one small
+          project's code for its large works) or a cost never updated in MEF.
+      - name: is_lagging
+        description: >
+          Active project with at least S/ 1M contracted, a first contract signed
+          more than 12 months ago and less than 25% physical progress.
+
+  - name: mart_supplier_concentration
+    description: >
+      Supplier concentration of each entity's awards per year. Only awards
+      with a supplier, a date and a positive amount are counted.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [entity_id, award_year]
+    columns:
+      - name: hhi
+        description: >
+          Herfindahl-Hirschman Index of supplier shares, from near 0 (many
+          small suppliers) to 10,000 (a single supplier).
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 10000.0001
+      - name: top_supplier_share
+        description: Share of the awarded amount won by the largest supplier (0-1).
+      - name: concentration_level
+        description: low (HHI < 1,500), moderate (< 2,500) or high.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [low, moderate, high]
