@@ -1,0 +1,35 @@
+version: 2
+
+sources:
+  - name: oece
+    description: >
+      OECE (SEACE v3) procurement data in the Open Contracting Data Standard,
+      loaded by the `oece_ingest` DAG. One JSONB document per CSV row of the
+      monthly bulk files; keys are the original OCDS column paths.
+    schema: raw
+    loaded_at_field: _loaded_at
+    config:
+      freshness:
+        warn_after: {count: 2, period: day}
+        error_after: {count: 7, period: day}
+    tables:
+      - name: oece_records
+        description: One compiled record per contracting process (tender, buyer, budget).
+      - name: oece_com_parties
+        description: Organizations involved in a process (buyer, tenderers, suppliers).
+      - name: oece_com_ten_tenderers
+        description: Bidders per tender.
+      - name: oece_com_ten_items
+        description: Items requested in a tender.
+      - name: oece_com_ten_ite_additionalclassific
+        description: UNSPSC classification of tender items.
+      - name: oece_com_awards
+        description: Awards per process.
+      - name: oece_com_awa_suppliers
+        description: Suppliers of each award.
+      - name: oece_com_awa_val_exchangerates
+        description: Exchange rate to soles of awards not in soles.
+      - name: oece_com_contracts
+        description: Signed contracts.
+      - name: oece_com_con_val_exchangerates
+        description: Exchange rate to soles of contracts not in soles.

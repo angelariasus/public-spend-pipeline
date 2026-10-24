@@ -1,0 +1,178 @@
+version: 2
+
+models:
+  - name: stg_oece__records
+    description: One row per contracting process, with tender, buyer and budget fields.
+    columns:
+      - name: ocid
+        description: Open Contracting ID, unique per process.
+        data_tests: [unique, not_null]
+      - name: tender_id
+        data_tests: [not_null]
+      - name: buyer_id
+        data_tests: [not_null]
+      - name: main_procurement_category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [goods, services, works]
+      - name: procurement_method
+        description: OCDS method; NULL for about a third of processes.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [open, selective, limited, direct]
+      - name: tender_currency
+        data_tests: [not_null]
+      - name: budget_project_ids
+        description: >
+          Investment project code(s) (MEF CODIGO_UNICO), comma-separated when a
+          process funds several projects.
+      - name: tender_amount_pen
+        description: >
+          Estimated tender value in soles. Uses the original amount for PEN
+          tenders because the portal's amount_PEN is sometimes 0 for them.
+
+  - name: stg_oece__parties
+    description: One row per organization and process, with its roles.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, party_id]
+      - composite_relationships:
+          arguments:
+            columns: [ocid]
+            to: ref('stg_oece__records')
+            to_columns: [ocid]
+    columns:
+      - name: identifier_scheme
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [PE-RUC, PE-CONSUCODE]
+
+  - name: stg_oece__tenderers
+    description: One row per bidder and process.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, tenderer_id]
+      - composite_relationships:
+          # The source truncates a few foreign tax IDs in the parties table
+          # (e.g. PE-RUC-76.878 vs PE-RUC-76.878.625-); only a systemic gap fails.
+          config:
+            warn_if: ">0"
+            error_if: ">100"
+          arguments:
+            columns: [ocid, tenderer_id]
+            to: ref('stg_oece__parties')
+            to_columns: [ocid, party_id]
+
+  - name: stg_oece__tender_items
+    description: One row per item requested in a tender.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, item_id]
+
+  - name: stg_oece__tender_item_classifications
+    description: UNSPSC classifications of tender items.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, item_id, classification_id]
+      - composite_relationships:
+          arguments:
+            columns: [ocid, item_id]
+            to: ref('stg_oece__tender_items')
+            to_columns: [ocid, item_id]
+
+  - name: stg_oece__awards
+    description: One row per award. award_id is only unique within a process.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, award_id]
+      - composite_relationships:
+          arguments:
+            columns: [ocid]
+            to: ref('stg_oece__records')
+            to_columns: [ocid]
+    columns:
+      - name: award_amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: award_currency
+        data_tests: [not_null]
+
+  - name: stg_oece__award_suppliers
+    description: One row per supplier of an award (consortia have several).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, award_id, supplier_id]
+      - composite_relationships:
+          arguments:
+            columns: [ocid, award_id]
+            to: ref('stg_oece__awards')
+            to_columns: [ocid, award_id]
+
+  - name: stg_oece__award_exchange_rates
+    description: Conversion rate to soles for awards in other currencies.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, award_id]
+    columns:
+      - name: target_currency
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [PEN]
+      - name: exchange_rate
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: false
+
+  - name: stg_oece__contracts
+    description: One row per signed contract. contract_id is only unique within a process.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, contract_id]
+      - composite_relationships:
+          # ~1k contracts point to an award missing from their process in the source.
+          config:
+            severity: warn
+          arguments:
+            columns: [ocid, award_id]
+            to: ref('stg_oece__awards')
+            to_columns: [ocid, award_id]
+    columns:
+      - name: contract_amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: stg_oece__contract_exchange_rates
+    description: Conversion rate to soles for contracts in other currencies.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ocid, contract_id]
+    columns:
+      - name: exchange_rate
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: false
