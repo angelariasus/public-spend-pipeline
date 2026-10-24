@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: mef
+    description: >
+      MEF Banco de Inversiones snapshots loaded by the `mef_ingest` DAG.
+      All columns land as text; staging models cast them.
+    schema: raw
+    loaded_at_field: _loaded_at
+    config:
+      freshness:
+        warn_after: {count: 7, period: day}
+        error_after: {count: 30, period: day}
+    tables:
+      - name: mef_investments
+        description: Active investments (one row per investment, 68 columns).
+      - name: mef_closed_investments
+        description: >
+          Closed investments (57 columns). Disjoint from mef_investments:
+          projects move here once they are closed.

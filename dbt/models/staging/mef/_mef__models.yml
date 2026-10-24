@@ -1,0 +1,58 @@
+version: 2
+
+models:
+  - name: stg_mef__investments
+    description: >
+      Active public investments from the MEF Banco de Inversiones, one row per
+      investment. Amounts are in soles; progress columns are percentages.
+    columns:
+      - name: project_code
+        description: >
+          CODIGO_UNICO, the key shared with OCDS budget project IDs. NULL for
+          a few dozen rows.
+        data_tests: [unique]
+      - name: government_level
+        description: GN (national), GR (regional) or GL (local).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [GN, GR, GL]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [ACTIVO]
+      - name: physical_progress_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              config:
+                severity: warn
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: updated_cost
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: stg_mef__closed_investments
+    description: >
+      Closed public investments from the MEF Banco de Inversiones, one row per
+      investment. Disjoint from stg_mef__investments.
+    columns:
+      - name: project_code
+        description: CODIGO_UNICO. NULL for ~3k old SNIP-era projects.
+        data_tests: [unique]
+      - name: government_level
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [GN, GR, GL]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [CERRADO]
