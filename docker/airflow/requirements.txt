@@ -1,0 +1,4 @@
+# Runtime dependencies of src/public_spend, installed into the Airflow image.
+# Keep in sync with [project.dependencies] in pyproject.toml.
+psycopg[binary]>=3.3
+requests>=2.32
