@@ -18,8 +18,10 @@ refreshed daily, so later loads will differ slightly.
 - **Consortia win 60% of the amount with 22% of the awards.** Companies win
   36% with 59% of the awards; individuals and foreign suppliers share the
   remaining 4%. Large works go to consortia, routine purchases to companies.
-- **2% of the awarded amount was in foreign currency** (S/ 7.9 billion after
-  conversion), almost all of it with a rate reported by the award itself.
+- **3.5% of the awarded amount was in foreign currency** (S/ 7.9 billion after
+  conversion), although only 2% of the awards were: foreign-currency awards
+  are larger on average. Almost all of it uses a rate reported by the award
+  itself.
 
 ## Supplier concentration
 
