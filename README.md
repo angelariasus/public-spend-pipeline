@@ -1,6 +1,6 @@
 <div align="center">
 
-# Public Spend Pipeline
+<img src="docs/images/banner.jpg" width="100%" alt="Public Spend Pipeline: ELT pipeline linking Peru's public procurement with public investment execution">
 
 **Contracted vs. delivered: an end-to-end ELT pipeline that links Peru's public
 procurement contracts with the execution of public investment projects.**
@@ -83,16 +83,7 @@ Full analysis in [docs/findings.md](docs/findings.md).
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    oece["OECE OCDS API<br/>monthly bulk ZIPs"] --> ingest
-    mef["MEF investment CSVs<br/>active + closed"] --> ingest
-    ingest["Airflow<br/>oece_ingest · mef_ingest"] --> raw[("raw<br/>as landed")]
-    raw --> dbt["Airflow<br/>dbt_build"]
-    dbt --> staging[("staging<br/>typed, tested")] --> intermediate[("intermediate<br/>soles, bridges")] --> marts[("marts<br/>star schema")]
-    marts --> metabase["Metabase"]
-    marts --> powerbi["Power BI"]
-```
+![Architecture: OECE and MEF data ingested by Airflow into PostgreSQL, transformed by dbt through raw, staging, intermediate and marts, and read by Metabase and Power BI](docs/images/architecture.png)
 
 Three Airflow DAGs run the pipeline. `oece_ingest` (09:30 Lima time) and
 `mef_ingest` (10:00) load the `raw` schema; each successful load emits a data
