@@ -2,3 +2,5 @@
 * text=auto eol=lf
 *.png binary
 *.pbix binary
+*.gif binary
+*.mp4 binary
