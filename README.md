@@ -15,6 +15,7 @@ procurement contracts with the execution of public investment projects.**
 [![dbt](https://img.shields.io/badge/dbt--core-1.12-FF694B)](https://www.getdbt.com/)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Metabase](https://img.shields.io/badge/Metabase-0.64-509EE3?logo=metabase&logoColor=white)](https://www.metabase.com/)
+[![Power BI](https://img.shields.io/badge/Power%20BI-report-F2C811)](#power-bi)
 
 [![uv](https://img.shields.io/badge/uv-DE5FE9?logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
 [![Ruff](https://img.shields.io/badge/Ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
@@ -90,13 +91,14 @@ flowchart LR
     raw --> dbt["Airflow<br/>dbt_build"]
     dbt --> staging[("staging<br/>typed, tested")] --> intermediate[("intermediate<br/>soles, bridges")] --> marts[("marts<br/>star schema")]
     marts --> metabase["Metabase"]
+    marts --> powerbi["Power BI"]
 ```
 
 Three Airflow DAGs run the pipeline. `oece_ingest` (09:30 Lima time) and
 `mef_ingest` (10:00) load the `raw` schema; each successful load emits a data
 asset, and `dbt_build` starts once both assets have been updated (asset-aware
 scheduling), checks source freshness and builds every model with its tests.
-Metabase reads the `marts` schema through a read-only role.
+Metabase and Power BI read the `marts` schema through a read-only role.
 
 Everything runs locally with Docker Compose. The daily run step by step, the
 warehouse layers and the full entity-relationship diagram are in
@@ -111,6 +113,7 @@ warehouse layers and the full entity-relationship diagram are in
 | Warehouse | PostgreSQL 16 | `raw`, `staging`, `intermediate` and `marts` schemas |
 | Transformation | dbt-core 1.12, dbt_utils | 26 models, 97 data tests, source freshness, grants |
 | BI | Metabase 0.64 | Two dashboards provisioned as code through the API |
+| BI | Power BI | Three-page report on the same marts, with a star schema and DAX measures |
 | Infrastructure | Docker Compose | Postgres, Airflow (API server, scheduler, DAG processor), Metabase |
 | Quality | pytest, Ruff, SQLFluff, pre-commit | Unit and integration tests, Python and SQL linting, commit hooks |
 | CI | GitHub Actions | Lint, `dbt parse`, tests against a Postgres service, Compose validation |
@@ -205,6 +208,8 @@ column is described in the [data dictionary](docs/data-dictionary.md).
 
 ## Dashboards
 
+### Metabase
+
 Metabase connects as `bi_reader`, a role that can only read `marts`. dbt
 grants it access on every build, so rebuilds never break the dashboards.
 
@@ -232,6 +237,43 @@ an edit updates Metabase in place.
 <summary><b>Investment projects: contracted vs delivered</b> (full dashboard)</summary>
 
 ![Investment projects dashboard](docs/images/metabase-investment-vs-procurement.png)
+
+</details>
+
+### Power BI
+
+A three-page report reads the same `marts` schema as `bi_reader`, in import
+mode. Dimensions filter the facts through one-to-many relationships, `dim_date`
+is the date table, and the numbers come from 22 DAX measures.
+
+![Power BI report walkthrough](docs/images/powerbi-demo.gif)
+
+The [full video](docs/media/powerbi-demo.mp4) is 54 seconds.
+
+| Page | Answers |
+|------|---------|
+| **Public procurement** | Awarded amount by month and category, supplier type, buyer's department and top entities |
+| **Supplier concentration** | Entities by HHI level, how much each level awards, and the entities awarding S/ 10M or more in a year |
+| **Investment** | Contracted vs accrued spend by government level, lagging projects by department, and contracts above 150% of the project cost |
+
+<details>
+<summary><b>Public procurement</b> (full page)</summary>
+
+![Power BI: public procurement](docs/images/powerbi-procurement.png)
+
+</details>
+
+<details>
+<summary><b>Supplier concentration</b> (full page)</summary>
+
+![Power BI: supplier concentration](docs/images/powerbi-concentration.png)
+
+</details>
+
+<details>
+<summary><b>Investment: contracted vs delivered</b> (full page)</summary>
+
+![Power BI: investment](docs/images/powerbi-investment.png)
 
 </details>
 
@@ -354,7 +396,7 @@ public-spend-pipeline/
 │   │   └── marts/             # core star schema + analytics marts
 │   └── tests/                 # generic and singular tests
 ├── docker/                    # Airflow image (with a dbt virtualenv), Postgres init scripts
-├── docs/                      # architecture, data dictionary, design decisions, findings
+├── docs/                      # architecture, data dictionary, design decisions, findings, images
 ├── src/public_spend/
 │   ├── oece/                  # index client, ZIP reader, raw loader
 │   ├── mef/                   # conditional download, snapshot loader
